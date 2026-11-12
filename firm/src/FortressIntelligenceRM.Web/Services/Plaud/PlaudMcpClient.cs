@@ -18,7 +18,25 @@ public record PlaudFileInfo(string Id, string? Name, DateTime? StartAt, DateTime
 public class PlaudMcpException : Exception
 {
     public HttpStatusCode? StatusCode { get; }
+    /// <summary>WI #9135 — the Retry-After of a 429 (or the time left on the instance pause).</summary>
+    public TimeSpan? RetryAfter { get; init; }
+    /// <summary>WI #9135 — true when no request was sent because this instance is paused after 3 × 429 in 5 min.</summary>
+    public bool InstancePaused { get; init; }
     public PlaudMcpException(string message, HttpStatusCode? statusCode = null) : base(message) => StatusCode = statusCode;
+
+    /// <summary>Retry-After as a delta or an HTTP date; null when absent.</summary>
+    public static TimeSpan? ReadRetryAfter(HttpResponseMessage res)
+    {
+        var ra = res.Headers.RetryAfter;
+        if (ra?.Delta is { } delta)
+            return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+        if (ra?.Date is { } date)
+        {
+            var left = date - DateTimeOffset.UtcNow;
+            return left < TimeSpan.Zero ? TimeSpan.Zero : left;
+        }
+        return null;
+    }
 }
 
 /// <summary>
@@ -43,13 +61,35 @@ public class PlaudMcpClient
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly PlaudOptions _options;
+    private readonly PlaudRateLimiter _rateLimiter;
     private readonly ILogger<PlaudMcpClient> _logger;
 
-    public PlaudMcpClient(IHttpClientFactory httpClientFactory, IOptions<PlaudOptions> options, ILogger<PlaudMcpClient> logger)
+    public PlaudMcpClient(IHttpClientFactory httpClientFactory, IOptions<PlaudOptions> options,
+        PlaudRateLimiter rateLimiter, ILogger<PlaudMcpClient> logger)
     {
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
+        _rateLimiter = rateLimiter;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// WI #9135 (spec §5.4): every MCP POST takes a token from the per-instance bucket (30/min, waits when
+    /// empty) and fails fast while the instance is paused after 3 × 429 in 5 min. A 429 is recorded for
+    /// the circuit and surfaces as a <see cref="PlaudMcpException"/> carrying Retry-After.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendGatedAsync(HttpRequestMessage req, string label, CancellationToken ct)
+    {
+        await _rateLimiter.AcquireAsync(ct);
+        var res = await Http().SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (res.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            var retryAfter = PlaudMcpException.ReadRetryAfter(res);
+            res.Dispose();
+            _rateLimiter.Record429();
+            throw new PlaudMcpException($"MCP {label} rate-limited", HttpStatusCode.TooManyRequests) { RetryAfter = retryAfter };
+        }
+        return res;
     }
 
     /// <summary>An open MCP session bound to one access token.</summary>
@@ -287,7 +327,7 @@ public class PlaudMcpClient
 
         // Notification: no id, server answers 202 Accepted with no body.
         using var req = BuildRequest(session, new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" });
-        using var res = await Http().SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var res = await SendGatedAsync(req, "notifications/initialized", ct);
         if (!res.IsSuccessStatusCode)
             throw new PlaudMcpException("MCP notifications/initialized failed", res.StatusCode);
     }
@@ -298,7 +338,17 @@ public class PlaudMcpClient
         var message = new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = parameters };
         var sw = Stopwatch.StartNew();
         using var req = BuildRequest(session, message);
-        using var res = await Http().SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        HttpResponseMessage gated;
+        try
+        {
+            gated = await SendGatedAsync(req, label, ct);
+        }
+        catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests && !ex.InstancePaused)
+        {
+            _logger.LogInformation("[PlaudMcp] {Call} status=429 ms={Ms}", label, sw.ElapsedMilliseconds);
+            throw;
+        }
+        using var res = gated;
         _logger.LogInformation("[PlaudMcp] {Call} status={Status} ms={Ms}", label, (int)res.StatusCode, sw.ElapsedMilliseconds);
 
         if (!res.IsSuccessStatusCode)

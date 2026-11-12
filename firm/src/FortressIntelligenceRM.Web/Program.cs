@@ -99,6 +99,8 @@ builder.Services.Configure<FortressIntelligenceRM.Web.Services.Plaud.PlaudOption
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudMcpClient>();
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService, FortressIntelligenceRM.Web.Services.Plaud.PlaudOAuthService>();
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService>(); // WI #9134 — Plaud import (Sync now)
+// WI #9135 — per-instance Plaud pacing: 30 MCP requests/min token bucket + 3×429-in-5-min instance pause (spec §5.4).
+builder.Services.AddSingleton<FortressIntelligenceRM.Web.Services.Plaud.PlaudRateLimiter>();
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddScoped<AdminAccessService>();
 builder.Services.AddScoped<SpeakerEmbeddingService>();
@@ -209,6 +211,8 @@ builder.Services.AddHostedService<StuckMeetingRecoveryService>();
 // WI #9132: fails meetings stuck in Transcribing/Summarizing (all sources) after
 // Firm:StaleTranscribingHours (default 4, read by the service; values below 1 are clamped to 1).
 builder.Services.AddHostedService<StaleMeetingWatchdogService>();
+// WI #9135: Plaud auto-sync poller. Always registered; returns at once unless Firm:Plaud:Enabled (spec §5.2).
+builder.Services.AddHostedService<FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncBackgroundService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
 // builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled

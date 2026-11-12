@@ -11,11 +11,117 @@ namespace FortressIntelligenceRM.Web.Services.Plaud;
 public record PlaudSyncRunResult(bool AlreadyRunning, int Found, int Imported, int Waiting, string? ErrorCode)
 {
     public static readonly PlaudSyncRunResult Busy = new(true, 0, 0, 0, null);
+
+    /// <summary>WI #9135 "Import older": new ledger rows queued by this click (at most 25).</summary>
+    public int Queued { get; init; }
+    /// <summary>WI #9135 "Import older": unseen recordings listed in the window but not queued by this click.</summary>
+    public int MoreAvailable { get; init; }
+    /// <summary>WI #9135 "Import older": listing stopped at its page cap, so more may exist beyond MoreAvailable.</summary>
+    public bool MaybeMore { get; init; }
 }
 
-/// <summary>Settings status lines (spec §6.1).</summary>
+/// <summary>Settings status lines (spec §6.1). WI #9135 adds the auto-sync fields.</summary>
 public record PlaudSyncStatus(int Imported, int Waiting, int Skipped, DateTime? LastCheckedAt, string State,
-    string? LastErrorCode, int BackfillDays, bool WindowLocked);
+    string? LastErrorCode, int BackfillDays, bool WindowLocked)
+{
+    public bool AutoSync { get; init; }
+    public int IntervalMinutes { get; init; } = PlaudSyncService.DefaultIntervalMinutes;
+    public DateTime? NextSyncAt { get; init; }
+    public DateTime? LastImportAt { get; init; }
+    public int LastImportedCount { get; init; }
+    public int TooLong { get; init; }
+    public int NoAudio { get; init; }
+    public DateTime? SyncFrom { get; init; }
+}
+
+/// <summary>
+/// WI #9135 — per-instance Plaud pacing (spec §5.4), a singleton shared by every Plaud MCP call in this process:
+///   - token bucket of <see cref="RequestsPerMinute"/> (30) requests per minute; callers wait for a token;
+///   - instance circuit: <see cref="CircuitThreshold"/> (3) × 429 within <see cref="CircuitWindow"/> (5 min)
+///     pauses all Plaud calls on this instance for <see cref="CircuitPause"/> (15 min). While paused,
+///     <see cref="AcquireAsync"/> throws a 429 <see cref="PlaudMcpException"/> with InstancePaused set and no
+///     request is sent.
+/// </summary>
+public sealed class PlaudRateLimiter
+{
+    public const int RequestsPerMinute = 30;
+    public const int CircuitThreshold = 3;
+    public static readonly TimeSpan CircuitWindow = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan CircuitPause = TimeSpan.FromMinutes(15);
+
+    private readonly object _gate = new();
+    private readonly Queue<DateTime> _recent429 = new();
+    private readonly ILogger<PlaudRateLimiter> _logger;
+    private double _tokens = RequestsPerMinute;
+    private DateTime _lastRefill = DateTime.UtcNow;
+    private DateTime _pausedUntil = DateTime.MinValue;
+
+    public PlaudRateLimiter(ILogger<PlaudRateLimiter> logger) => _logger = logger;
+
+    /// <summary>Time left on the instance pause, or null when not paused.</summary>
+    public TimeSpan? PausedFor
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var left = _pausedUntil - DateTime.UtcNow;
+                return left > TimeSpan.Zero ? left : null;
+            }
+        }
+    }
+
+    /// <summary>Takes one request token, waiting for the bucket to refill. Throws while the instance is paused.</summary>
+    public async Task AcquireAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            TimeSpan wait;
+            lock (_gate)
+            {
+                var now = DateTime.UtcNow;
+                if (_pausedUntil > now)
+                    throw new PlaudMcpException("Plaud calls paused on this instance", System.Net.HttpStatusCode.TooManyRequests)
+                    {
+                        RetryAfter = _pausedUntil - now,
+                        InstancePaused = true,
+                    };
+                var elapsed = (now - _lastRefill).TotalSeconds;
+                if (elapsed > 0)
+                {
+                    _tokens = Math.Min(RequestsPerMinute, _tokens + elapsed * RequestsPerMinute / 60.0);
+                    _lastRefill = now;
+                }
+                if (_tokens >= 1)
+                {
+                    _tokens -= 1;
+                    return;
+                }
+                wait = TimeSpan.FromSeconds((1 - _tokens) * 60.0 / RequestsPerMinute);
+            }
+            await Task.Delay(wait < TimeSpan.FromMilliseconds(50) ? TimeSpan.FromMilliseconds(50) : wait, ct);
+        }
+    }
+
+    /// <summary>Records an HTTP 429 from Plaud; the third within 5 minutes pauses the instance for 15 minutes.</summary>
+    public void Record429()
+    {
+        lock (_gate)
+        {
+            var now = DateTime.UtcNow;
+            _recent429.Enqueue(now);
+            while (_recent429.Count > 0 && now - _recent429.Peek() > CircuitWindow)
+                _recent429.Dequeue();
+            if (_recent429.Count >= CircuitThreshold)
+            {
+                _pausedUntil = now + CircuitPause;
+                _recent429.Clear();
+                _logger.LogWarning("[PlaudSync] instance paused for {Minutes} min after {Count} x 429 within {Window} min",
+                    (int)CircuitPause.TotalMinutes, CircuitThreshold, (int)CircuitWindow.TotalMinutes);
+            }
+        }
+    }
+}
 
 /// <summary>
 /// WI #9134 — Plaud import (spec §4.4–§4.7, §5.2 step list, §8.2 caps).
@@ -49,6 +155,42 @@ public class PlaudSyncService
     private static readonly TimeSpan SyncNowClaimWait = TimeSpan.FromSeconds(10);
     private static readonly string InstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
 
+    // WI #9135 — auto-sync schedule (spec §5.3, §5.4).
+    public const int DefaultIntervalMinutes = 30;
+    public const int MinIntervalMinutes = 10;
+    public const int MaxIntervalMinutes = 1440;
+    /// <summary>"Check every" choices in Settings (spec §5.3).</summary>
+    public static readonly int[] IntervalChoices = { 10, 15, 30, 60, 240 };
+    /// <summary>Users claimed per background tick per instance (spec §5.2).</summary>
+    public const int DueUsersPerTick = 5;
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromHours(6);
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromHours(24);
+    private static readonly TimeSpan BacklogRecheck = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan FirstRunSpread = TimeSpan.FromMinutes(2);
+    // WI #9135 — "Import older…" (spec §5.3): 25 listed per click.
+    public const int ImportOlderPerClick = 25;
+    public const int ImportOlderMaxDaysBack = 365;
+    private const int ImportOlderMaxPages = 10;
+
+    public const string StateIdle = "idle";
+    public const string StateOk = "ok";
+    public const string StateBackoff = "backoff";
+    public const string StateRateLimited = "rate_limited";
+    public const string StateReconnectNeeded = "reconnect_needed";
+    public const string StateDisconnected = "disconnected";
+    /// <summary>firm_plaud_sync.state values that stop polling (spec §5.2, §5.4).</summary>
+    public static readonly string[] NotPolledStates = { StateReconnectNeeded, StateDisconnected };
+
+    /// <summary>Interval in minutes clamped to [10, 1440] (spec §5.3); anything below 10 becomes 10.</summary>
+    public static int ClampInterval(int minutes) => Math.Clamp(minutes, MinIntervalMinutes, MaxIntervalMinutes);
+
+    /// <summary>A fresh per-run claim token (nonce first, so truncation to claimed_by's 64 chars never drops it).</summary>
+    public static string NewClaimToken()
+    {
+        var token = $"{Guid.NewGuid():N}:{InstanceId}";
+        return token.Length > 64 ? token[..64] : token;
+    }
+
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IPlaudOAuthService _oauth;
     private readonly PlaudMcpClient _mcp;
@@ -72,7 +214,14 @@ public class PlaudSyncService
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+        // oauth_env = this instance's redirect host (same derivation as PlaudOAuthService, spec §9.2).
+        _envHost = Uri.TryCreate(_options.RedirectUri, UriKind.Absolute, out var redirect) ? redirect.Host : "";
     }
+
+    private readonly string _envHost;
+
+    /// <summary>This instance's Plaud redirect host; only accounts whose oauth_env equals it are polled.</summary>
+    public string EnvHost => _envHost;
 
     // ── Claim (spec §5.2) ────────────────────────────────────────────────────────────────────────
 
@@ -84,18 +233,11 @@ public class PlaudSyncService
         CancellationToken ct = default)
     {
         await EnsureSyncRowAsync(userId, ct);
-        // Per-run token (nonce first, so truncation to claimed_by's 64 chars never drops it).
-        var claimToken = $"{Guid.NewGuid():N}:{InstanceId}";
-        if (claimToken.Length > 64) claimToken = claimToken[..64];
-        var deadline = DateTime.UtcNow + SyncNowClaimWait;
-        while (!await TryClaimUserAsync(userId, claimToken, ct))
+        var claimToken = NewClaimToken();
+        if (!await WaitForClaimAsync(userId, claimToken, ct))
         {
-            if (DateTime.UtcNow >= deadline)
-            {
-                _logger.LogInformation("[PlaudSync] user={UserId} sync now skipped: already running", userId);
-                return PlaudSyncRunResult.Busy;
-            }
-            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            _logger.LogInformation("[PlaudSync] user={UserId} sync now skipped: already running", userId);
+            return PlaudSyncRunResult.Busy;
         }
         try
         {
@@ -103,36 +245,58 @@ public class PlaudSyncService
         }
         finally
         {
-            await ReleaseUserClaimAsync(userId, claimToken);
+            await ReleaseUserClaimAsync(userId, claimToken, CancellationToken.None);
         }
     }
 
-    /// <summary>The single conditional UPDATE from spec §5.2: ownership is decided by the affected-row count.</summary>
-    public async Task<bool> TryClaimUserAsync(Guid userId, string claimToken, CancellationToken ct = default)
+    /// <summary>Manual callers (Sync now, Import older) wait up to 10 s for the claim (spec §5.2).</summary>
+    private async Task<bool> WaitForClaimAsync(Guid userId, string claimToken, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + SyncNowClaimWait;
+        while (!await TryClaimUserAsync(userId, claimToken, requireDue: false, ct))
+        {
+            if (DateTime.UtcNow >= deadline)
+                return false;
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The single conditional UPDATE from spec §5.2: ownership is decided by the affected-row count
+    /// (1 = this caller owns the user's run; 0 = another run holds a claim younger than 10 minutes).
+    /// With <paramref name="requireDue"/> (the background poller) the same UPDATE also re-checks that the
+    /// user is still due, so a run another instance just finished (and rescheduled) is not repeated.
+    /// </summary>
+    public async Task<bool> TryClaimUserAsync(Guid userId, string claimToken, bool requireDue, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var now = DateTime.UtcNow;
         var staleBefore = now - UserClaimStaleAfter;
-        var rows = await db.PlaudSyncs
-            .Where(s => s.UserId == userId && (s.ClaimedAt == null || s.ClaimedAt < staleBefore))
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(s => s.ClaimedBy, claimToken)
-                .SetProperty(s => s.ClaimedAt, now)
-                .SetProperty(s => s.UpdatedAt, now), ct);
+        var target = db.PlaudSyncs
+            .Where(s => s.UserId == userId && (s.ClaimedAt == null || s.ClaimedAt < staleBefore));
+        if (requireDue)
+            target = target.Where(s => s.AutoSync && s.NextSyncAt != null && s.NextSyncAt <= now
+                                       && !NotPolledStates.Contains(s.State));
+        var rows = await target.ExecuteUpdateAsync(u => u
+            .SetProperty(s => s.ClaimedBy, claimToken)
+            .SetProperty(s => s.ClaimedAt, now)
+            .SetProperty(s => s.UpdatedAt, now), ct);
         return rows == 1;
     }
 
-    public async Task ReleaseUserClaimAsync(Guid userId, string claimToken)
+    /// <summary>Releases this caller's claim. Callers pass CancellationToken.None from their finally block.</summary>
+    public async Task ReleaseUserClaimAsync(Guid userId, string claimToken, CancellationToken ct)
     {
         try
         {
-            await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
             await db.PlaudSyncs
                 .Where(s => s.UserId == userId && s.ClaimedBy == claimToken)
                 .ExecuteUpdateAsync(u => u
                     .SetProperty(s => s.ClaimedBy, (string?)null)
                     .SetProperty(s => s.ClaimedAt, (DateTime?)null)
-                    .SetProperty(s => s.UpdatedAt, DateTime.UtcNow), CancellationToken.None);
+                    .SetProperty(s => s.UpdatedAt, DateTime.UtcNow), ct);
         }
         catch (Exception ex)
         {
@@ -143,8 +307,45 @@ public class PlaudSyncService
 
     // ── One run ──────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// WI #9135 — users the background poller should run now (spec §5.2): auto_sync = 1, state not in
+    /// (reconnect_needed, disconnected), next_sync_at &lt;= now, joined to an account row whose oauth_env is this
+    /// instance's redirect host (dev and prod share the DB, spec §9.2) and that does not need a reconnect.
+    /// Unclaimed (or stale-claimed) users only, soonest first, at most <see cref="DueUsersPerTick"/> (LIMIT 5).
+    /// </summary>
+    public async Task<List<Guid>> GetDueUserIdsAsync(int limit = DueUsersPerTick, CancellationToken ct = default)
+    {
+        var envHost = _envHost;
+        if (envHost.Length == 0)
+            return new List<Guid>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
+        var staleBefore = now - UserClaimStaleAfter;
+        return await (
+                from s in db.PlaudSyncs
+                join a in db.PlaudAccounts on s.UserId equals a.UserId
+                where s.AutoSync
+                      && !NotPolledStates.Contains(s.State)
+                      && s.NextSyncAt != null && s.NextSyncAt <= now
+                      && a.OAuthEnv == envHost
+                      && !a.NeedsReconnect
+                      && (s.ClaimedAt == null || s.ClaimedAt < staleBefore)
+                orderby s.NextSyncAt
+                select s.UserId)
+            .Take(Math.Clamp(limit, 1, DueUsersPerTick))
+            .ToListAsync(ct);
+    }
+
     /// <summary>One sync run for a user. The caller must hold the user's claim.</summary>
-    public async Task<PlaudSyncRunResult> SyncUserAsync(Guid userId, string trigger, CancellationToken ct = default)
+    public Task<PlaudSyncRunResult> SyncUserAsync(Guid userId, string trigger, CancellationToken ct = default)
+        => RunAsync(userId, trigger, olderWindow: null, ct);
+
+    /// <summary>
+    /// One run. With <paramref name="olderWindow"/> ("Import older…") step 2 lists that one-off window
+    /// instead of the regular one and queues at most 25 new rows as backfill.
+    /// </summary>
+    private async Task<PlaudSyncRunResult> RunAsync(Guid userId, string trigger, (DateTime From, DateTime To)? olderWindow,
+        CancellationToken ct)
     {
         trigger = trigger is PlaudSyncTrigger.Auto or PlaudSyncTrigger.Backfill ? trigger : PlaudSyncTrigger.Manual;
         var sync = await EnsureSyncRowAsync(userId, ct);
@@ -156,16 +357,18 @@ public class PlaudSyncService
         if (token == null)
         {
             var status = await _oauth.GetStatusAsync(userId, ct);
-            var (state, code) = !status.Connected ? ("disconnected", "not_connected")
-                : status.NeedsReconnect ? ("reconnect_needed", "reconnect_needed")
-                : status.OtherEnvironment ? ("idle", "other_environment")
-                : ("backoff", "token_unavailable");
-            await WriteRunStatusAsync(userId, state, code, success: false, importedCount: 0, ct);
+            var (state, code) = !status.Connected ? (StateDisconnected, "not_connected")
+                : status.NeedsReconnect ? (StateReconnectNeeded, "reconnect_needed")
+                : status.OtherEnvironment ? (StateIdle, "other_environment")
+                : (StateBackoff, "token_unavailable");
+            await WriteRunStatusAsync(userId, state, code, success: false, importedCount: 0, retryAfter: null, backlog: false, ct);
             return new PlaudSyncRunResult(false, 0, 0, await CountWaitingAsync(userId, ct), code);
         }
 
-        int found = 0, imported = 0;
+        int found = 0, imported = 0, queued = 0, more = 0;
+        var maybeMore = false;
         string? errorCode = null;
+        TimeSpan? retryAfter = null;
         try
         {
             var session = await OpenSessionAsync(userId, token, ct);
@@ -174,17 +377,31 @@ public class PlaudSyncService
             await HousekeepAsync(userId, ct);
             imported += await RetrySubmitFailedAsync(userId, ct);
 
-            // 2. List the window.
-            found = await ListWindowAsync(session, userId, sync, trigger, ct);
+            // 2. List the window (regular, or the one-off "Import older" window).
+            if (olderWindow is { } w)
+            {
+                var older = await ListOlderWindowAsync(session, userId, w.From, w.To, ct);
+                (found, queued, more, maybeMore) = (older.Found, older.Queued, older.More, older.MaybeMore);
+            }
+            else
+            {
+                found = await ListWindowAsync(session, userId, sync, trigger, ct);
+            }
 
             // 3. Import within the caps.
-            var (n, code) = await ImportQueuedAsync(session, userId, user.EntraOid, trigger, ct);
-            imported += n;
-            errorCode = code;
+            imported += await ImportQueuedAsync(session, userId, user.EntraOid, trigger, ct);
+        }
+        catch (PlaudReconnectNeededException)
+        {
+            errorCode = "reconnect_needed";
         }
         catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
         {
+            // Spec §5.4: honour Retry-After for this user; the instance circuit is counted by PlaudRateLimiter.
             errorCode = "rate_limited";
+            retryAfter = ex.RetryAfter;
+            _logger.LogWarning("[PlaudSync] 429 user={UserId} retry_after={RetryAfter} instance_paused={Paused}",
+                userId, ex.RetryAfter.HasValue ? ((int)ex.RetryAfter.Value.TotalSeconds).ToString() : "-", ex.InstancePaused);
         }
         catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
         {
@@ -202,18 +419,47 @@ public class PlaudSyncService
         {
             errorCode = "plaud_timeout";
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Anything else still backs off, so a poisoned user is not retried every tick.
+            errorCode = "sync_error";
+            _logger.LogWarning("[PlaudSync] user={UserId} run failed: {Error}", userId, ex.GetType().Name);
+        }
+
+        // A 401 whose forced refresh hit invalid_grant: PlaudOAuthService has flipped needs_reconnect.
+        if (errorCode == "unauthorized" && (await _oauth.GetStatusAsync(userId, CancellationToken.None)).NeedsReconnect)
+            errorCode = "reconnect_needed";
 
         var finalState = errorCode switch
         {
-            null => "ok",
-            "rate_limited" => "rate_limited",
-            _ => "backoff",
+            null => StateOk,
+            "rate_limited" => StateRateLimited,
+            "reconnect_needed" => StateReconnectNeeded,
+            _ => StateBackoff,
         };
-        await WriteRunStatusAsync(userId, finalState, errorCode, success: errorCode == null, imported, ct);
-        var waiting = await CountWaitingAsync(userId, ct);
-        _logger.LogInformation("[PlaudSync] user={UserId} trigger={Trigger} found={Found} imported={Imported} waiting={Waiting} code={Code}",
-            userId, trigger, found, imported, waiting, errorCode ?? "-");
-        return new PlaudSyncRunResult(false, found, imported, waiting, errorCode);
+        var backlog = errorCode == null && await CountQueuedAsync(userId, CancellationToken.None) > 0;
+        await WriteRunStatusAsync(userId, finalState, errorCode, success: errorCode == null, imported, retryAfter, backlog,
+            CancellationToken.None);
+
+        // "Import older" finished its window: sync_from moves back to the picked date (spec §5.3). While more
+        // recordings remain, sync_from stays put so the next click (same date) continues past the ledger.
+        if (olderWindow is { } done && errorCode == null && more == 0 && !maybeMore)
+            await MoveSyncFromBackAsync(userId, done.From, CancellationToken.None);
+
+        var waiting = await CountWaitingAsync(userId, CancellationToken.None);
+        _logger.LogInformation("[PlaudSync] user={UserId} trigger={Trigger} found={Found} queued={Queued} imported={Imported} waiting={Waiting} backlog={Backlog} code={Code}",
+            userId, trigger, found, olderWindow.HasValue ? queued : found, imported, waiting, backlog, errorCode ?? "-");
+        return new PlaudSyncRunResult(false, found, imported, waiting, errorCode)
+        {
+            Queued = queued,
+            MoreAvailable = more,
+            MaybeMore = maybeMore,
+        };
+    }
+
+    /// <summary>Thrown when a 401 survives one forced refresh: the account needs a reconnect (spec §5.4).</summary>
+    private sealed class PlaudReconnectNeededException : Exception
+    {
     }
 
     private async Task<PlaudMcpClient.Session> OpenSessionAsync(Guid userId, string token, CancellationToken ct)
@@ -227,8 +473,30 @@ public class PlaudSyncService
             // One forced (locked) refresh, then give up for this run; a dead grant flips needs_reconnect.
             var refreshed = await _oauth.GetAccessTokenAsync(userId, true, ct);
             if (refreshed == null) throw;
-            return await _mcp.OpenSessionAsync(refreshed, ct);
+            try
+            {
+                return await _mcp.OpenSessionAsync(refreshed, ct);
+            }
+            catch (PlaudMcpException again) when (again.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                // Spec §5.4: 401 after one refresh → needs_reconnect = 1, state = reconnect_needed, polling stops.
+                await MarkAccountNeedsReconnectAsync(userId);
+                throw new PlaudReconnectNeededException();
+            }
         }
+    }
+
+    private async Task MarkAccountNeedsReconnectAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
+        var envHost = _envHost;
+        var n = await db.PlaudAccounts
+            .Where(a => a.UserId == userId && a.OAuthEnv == envHost)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(a => a.NeedsReconnect, true)
+                .SetProperty(a => a.UpdatedAt, DateTime.UtcNow), CancellationToken.None);
+        if (n > 0)
+            _logger.LogWarning("[PlaudSync] user={UserId} reconnect needed: 401 after refresh", userId);
     }
 
     private async Task HousekeepAsync(Guid userId, CancellationToken ct)
@@ -359,14 +627,73 @@ public class PlaudSyncService
         if (candidates.Count == 0)
             return 0;
 
-        await using var ldb = await _dbFactory.CreateDbContextAsync(ct);
-        var ids = candidates.Select(f => f.Id).ToList();
-        var seen = (await ldb.PlaudImports.Where(r => r.UserId == userId && ids.Contains(r.PlaudFileId))
-            .Select(r => r.PlaudFileId).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+        var unseen = await FilterUnseenAsync(userId, candidates, ct);
+        return await InsertLedgerRowsAsync(userId, unseen, trigger, ct);
+    }
 
+    /// <summary>The candidates whose file id has no ledger row yet (any status counts as seen).</summary>
+    private async Task<List<PlaudFileInfo>> FilterUnseenAsync(Guid userId, List<PlaudFileInfo> candidates, CancellationToken ct)
+    {
+        if (candidates.Count == 0)
+            return candidates;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var ids = candidates.Select(f => f.Id).ToList();
+        var seen = (await db.PlaudImports.Where(r => r.UserId == userId && ids.Contains(r.PlaudFileId))
+            .Select(r => r.PlaudFileId).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+        return candidates.Where(f => !seen.Contains(f.Id)).ToList();
+    }
+
+    /// <summary>
+    /// WI #9135 — "Import older…" (spec §5.3): lists the one-off window [from, to) and queues at most
+    /// <see cref="ImportOlderPerClick"/> (25) unseen recordings, oldest first, as trigger_kind = 'backfill'.
+    /// Returns N found in the window, M queued, K more unseen (listed, not queued) and whether the listing
+    /// stopped at its page cap (more may exist).
+    /// </summary>
+    private async Task<(int Found, int Queued, int More, bool MaybeMore)> ListOlderWindowAsync(PlaudMcpClient.Session session,
+        Guid userId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        var dateFrom = DateOnly.FromDateTime(from.AddDays(-1));
+        var dateTo = DateOnly.FromDateTime(to.AddDays(1));
+        var inWindow = new Dictionary<string, PlaudFileInfo>(StringComparer.Ordinal);
+        var unseen = new Dictionary<string, PlaudFileInfo>(StringComparer.Ordinal);
+        var maybeMore = false;
+        for (var page = 1; page <= ImportOlderMaxPages; page++)
+        {
+            var (files, full) = await _mcp.ListFilesAsync(session, dateFrom, dateTo, page, PageSize, ct);
+            var fresh = files
+                .Where(f => (f.StartAt ?? f.CreatedAt) is { } at && at >= from && at < to)
+                .Where(f => inWindow.TryAdd(f.Id, f))
+                .ToList();
+            foreach (var f in await FilterUnseenAsync(userId, fresh, ct))
+                unseen.TryAdd(f.Id, f);
+            if (!full)
+                break;
+            // Enough to fill this click, or out of pages: anything further is for the next click.
+            if (unseen.Count > ImportOlderPerClick || page == ImportOlderMaxPages)
+            {
+                maybeMore = true;
+                break;
+            }
+        }
+
+        var toQueue = unseen.Values
+            .OrderBy(f => f.StartAt ?? f.CreatedAt)
+            .Take(ImportOlderPerClick)
+            .ToList();
+        var queued = await InsertLedgerRowsAsync(userId, toQueue, PlaudSyncTrigger.Backfill, ct);
+        return (inWindow.Count, queued, unseen.Count - toQueue.Count, maybeMore);
+    }
+
+    /// <summary>Inserts queued (or too_long) ledger rows; a concurrent insert of the same file id is left alone.</summary>
+    private async Task<int> InsertLedgerRowsAsync(Guid userId, List<PlaudFileInfo> files, string trigger, CancellationToken ct)
+    {
+        if (files.Count == 0)
+            return 0;
+        await using var ldb = await _dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
         var maxMs = (long)_options.MaxDurationMinutes * 60_000L;
         var added = 0;
-        foreach (var f in candidates.Where(f => !seen.Contains(f.Id)))
+        foreach (var f in files)
         {
             var tooLong = f.DurationMs is long ms && ms > maxMs;
             var row = new FirmPlaudImport
@@ -400,8 +727,12 @@ public class PlaudSyncService
         return added;
     }
 
-    /// <summary>Imports retryable rows oldest-first. Caps are checked before each get_file.</summary>
-    private async Task<(int Imported, string? ErrorCode)> ImportQueuedAsync(PlaudMcpClient.Session session, Guid userId,
+    /// <summary>
+    /// Imports retryable rows oldest-first, live (auto/manual) rows before backfill rows so a new recording
+    /// does not wait behind an "Import older" queue. Caps are checked before each get_file. A 429 is rethrown
+    /// (after the row is put back) so the run records Retry-After.
+    /// </summary>
+    private async Task<int> ImportQueuedAsync(PlaudMcpClient.Session session, Guid userId,
         string entraOid, string trigger, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
@@ -416,15 +747,14 @@ public class PlaudSyncService
                                 || r.Status == PlaudImportStatus.PendingAudio
                                 || (r.Status == PlaudImportStatus.Failed && r.Attempts < MaxFailedAttempts
                                     && r.NextAttemptAt != null && r.NextAttemptAt <= now)))
-                .OrderBy(r => r.RecordedAt ?? r.FirstSeenAt)
+                .OrderBy(r => r.TriggerKind == PlaudSyncTrigger.Backfill ? 1 : 0)
+                .ThenBy(r => r.RecordedAt ?? r.FirstSeenAt)
                 .Take(200)
                 .ToListAsync(ct);
         }
 
         var maxPerRun = Math.Max(0, _options.MaxImportsPerRun);
-        var maxPerUser = Math.Max(0, _options.MaxInFlightPerUser);
-        if (trigger == PlaudSyncTrigger.Backfill)
-            maxPerUser = Math.Min(maxPerUser, 1); // spec §8.2: 1 while the user's queue is a backfill
+        var maxPerUserLive = Math.Max(0, _options.MaxInFlightPerUser);
         var maxGlobal = Math.Max(0, _options.MaxInFlightGlobal);
         var maxMs = (long)_options.MaxDurationMinutes * 60_000L;
 
@@ -441,6 +771,10 @@ public class PlaudSyncService
             // Caps, all before get_file.
             if (attempted >= maxPerRun)
                 break;
+            // spec §8.2: 1 in flight per user while the user's queue is a backfill (row or run).
+            var maxPerUser = trigger == PlaudSyncTrigger.Backfill || row.TriggerKind == PlaudSyncTrigger.Backfill
+                ? Math.Min(maxPerUserLive, 1)
+                : maxPerUserLive;
             var (userInFlight, globalInFlight) = await CountInFlightAsync(userId, ct);
             if (userInFlight >= maxPerUser || globalInFlight >= maxGlobal)
             {
@@ -457,13 +791,11 @@ public class PlaudSyncService
             var outcome = await ImportOneAsync(session, row, entraOid, ct);
             if (outcome == ImportOutcome.Imported)
                 imported++;
-            else if (outcome == ImportOutcome.RateLimited)
-                return (imported, "rate_limited");
         }
-        return (imported, null);
+        return imported;
     }
 
-    private enum ImportOutcome { Imported, NotImported, RateLimited }
+    private enum ImportOutcome { Imported, NotImported }
 
     private async Task<ImportOutcome> ImportOneAsync(PlaudMcpClient.Session session, FirmPlaudImport row,
         string entraOid, CancellationToken ct)
@@ -567,10 +899,10 @@ public class PlaudSyncService
         }
         catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            // Not the recording's fault: put it back, stop the run.
+            // Not the recording's fault: put it back and stop the run; RunAsync records Retry-After.
             await SetStatusAsync(row.Id, PlaudImportStatus.Importing, row.Status, null, CancellationToken.None);
             _logger.LogWarning("[PlaudSync] 429 user={UserId} file={FileId}", userId, fileId);
-            return ImportOutcome.RateLimited;
+            throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -875,8 +1207,15 @@ public class PlaudSyncService
         }
     }
 
+    private async Task<int> CountQueuedAsync(Guid userId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.PlaudImports.CountAsync(r => r.UserId == userId && r.Status == PlaudImportStatus.Queued, ct);
+    }
+
+    /// <summary>Writes the run's status and schedules the next auto run (spec §5.3, §5.4).</summary>
     private async Task WriteRunStatusAsync(Guid userId, string state, string? errorCode, bool success, int importedCount,
-        CancellationToken ct)
+        TimeSpan? retryAfter, bool backlog, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
         var row = await db.PlaudSyncs.FirstOrDefaultAsync(s => s.UserId == userId, CancellationToken.None);
@@ -901,7 +1240,207 @@ public class PlaudSyncService
             row.LastImportAt = now;
             row.LastImportedCount = importedCount;
         }
+        row.NextSyncAt = ComputeNextSyncAt(row.AutoSync, row.IntervalMinutes, state, row.ConsecutiveFailures,
+            retryAfter, backlog, now);
         await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// The next auto run (spec §5.3, §5.4). Null when auto-sync is off or the state stops polling.
+    ///   ok/idle:      now + interval × U(0.9, 1.1); now + 2 min while queued rows remain (backlog).
+    ///   backoff:      now + min(interval × 2^n, 6 h), n = consecutive failures.
+    ///   rate_limited: now + max(Retry-After, min(interval × 2^n, 6 h)); Retry-After capped at 24 h.
+    /// The interval is clamped to [10, 1440] whatever the stored value.
+    /// </summary>
+    public static DateTime? ComputeNextSyncAt(bool autoSync, int intervalMinutes, string state, int consecutiveFailures,
+        TimeSpan? retryAfter, bool backlog, DateTime now)
+    {
+        if (!autoSync || NotPolledStates.Contains(state))
+            return null;
+        var interval = TimeSpan.FromMinutes(ClampInterval(intervalMinutes));
+        switch (state)
+        {
+            case StateBackoff:
+                return now + Backoff(interval, consecutiveFailures);
+            case StateRateLimited:
+            {
+                var backoff = Backoff(interval, consecutiveFailures);
+                var ra = retryAfter is { } r ? (r > MaxRetryAfter ? MaxRetryAfter : r) : TimeSpan.Zero;
+                return now + (ra > backoff ? ra : backoff);
+            }
+            default:
+                return backlog ? now + BacklogRecheck : now + Jittered(interval);
+        }
+    }
+
+    /// <summary>min(interval × 2^n, 6 h).</summary>
+    public static TimeSpan Backoff(TimeSpan interval, int n)
+    {
+        var exponent = Math.Clamp(n, 0, 20);
+        var minutes = interval.TotalMinutes * Math.Pow(2, exponent);
+        return minutes >= MaxBackoff.TotalMinutes ? MaxBackoff : TimeSpan.FromMinutes(minutes);
+    }
+
+    /// <summary>±10% jitter: interval × U(0.9, 1.1).</summary>
+    private static TimeSpan Jittered(TimeSpan interval) =>
+        TimeSpan.FromSeconds(interval.TotalSeconds * (0.9 + 0.2 * Random.Shared.NextDouble()));
+
+    /// <summary>First run after enabling: now + U(0, 2 min).</summary>
+    private static DateTime FirstRunAt(DateTime now) =>
+        now + TimeSpan.FromSeconds(FirstRunSpread.TotalSeconds * Random.Shared.NextDouble());
+
+    private async Task MoveSyncFromBackAsync(Guid userId, DateTime from, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.PlaudSyncs
+            .Where(s => s.UserId == userId && (s.SyncFrom == null || s.SyncFrom > from))
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.SyncFrom, from)
+                .SetProperty(s => s.UpdatedAt, DateTime.UtcNow), ct);
+    }
+
+    /// <summary>Background safety net: a run that threw outside RunAsync still backs off instead of retrying every tick.</summary>
+    public async Task RecordRunErrorAsync(Guid userId, string errorCode)
+    {
+        try
+        {
+            await WriteRunStatusAsync(userId, StateBackoff, errorCode, success: false, importedCount: 0, retryAfter: null,
+                backlog: false, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[PlaudSync] user={UserId} status write failed: {Error}", userId, ex.GetType().Name);
+        }
+    }
+
+    // ── Auto-sync settings (WI #9135, spec §6.1) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// "Automatically sync my Plaud recordings". On: first run at now + U(0, 2 min) (sync_from is set by that
+    /// first run from "On first sync, import the last", so the window stays choosable until then). Off: clears
+    /// next_sync_at, so the poller never selects the user.
+    /// </summary>
+    public async Task SetAutoSyncAsync(Guid userId, bool enabled, CancellationToken ct = default)
+    {
+        await EnsureSyncRowAsync(userId, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
+        var next = enabled ? FirstRunAt(now) : (DateTime?)null;
+        await db.PlaudSyncs.Where(s => s.UserId == userId)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.AutoSync, enabled)
+                .SetProperty(s => s.NextSyncAt, next)
+                .SetProperty(s => s.UpdatedAt, now), ct);
+        _logger.LogInformation("[PlaudSync] user={UserId} auto_sync={AutoSync}", userId, enabled);
+    }
+
+    /// <summary>"Check every": clamped to [10, 1440]; returns the stored value. Pulls next_sync_at in if it is later than one new interval.</summary>
+    public async Task<int> SetIntervalAsync(Guid userId, int minutes, CancellationToken ct = default)
+    {
+        var clamped = ClampInterval(minutes);
+        await EnsureSyncRowAsync(userId, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.PlaudSyncs.FirstAsync(s => s.UserId == userId, ct);
+        var now = DateTime.UtcNow;
+        row.IntervalMinutes = clamped;
+        var interval = TimeSpan.FromMinutes(clamped);
+        if (row.AutoSync && row.State is StateOk or StateIdle
+                         && (row.NextSyncAt == null || row.NextSyncAt > now + interval * 1.1))
+            row.NextSyncAt = now + Jittered(interval);
+        row.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        return clamped;
+    }
+
+    /// <summary>
+    /// Called after a successful OAuth callback. D13: auto-sync is on by default on first connect (a sync row
+    /// that has never run and was never switched on). A reconnect clears reconnect_needed / disconnected so
+    /// polling resumes, keeping the user's own auto-sync choice.
+    /// </summary>
+    public async Task OnAccountConnectedAsync(Guid userId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
+        var row = await db.PlaudSyncs.FirstOrDefaultAsync(s => s.UserId == userId, ct);
+        if (row == null)
+        {
+            db.PlaudSyncs.Add(new FirmPlaudSync
+            {
+                UserId = userId,
+                AutoSync = true,
+                IntervalMinutes = DefaultIntervalMinutes,
+                NextSyncAt = FirstRunAt(now),
+                State = StateIdle,
+                UpdatedAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation("[PlaudSync] user={UserId} connected: auto_sync=True (default)", userId);
+                return;
+            }
+            catch (DbUpdateException ex) when (CalendarAutoSyncService.IsDuplicateKeyException(ex))
+            {
+                db.ChangeTracker.Clear();
+                row = await db.PlaudSyncs.FirstAsync(s => s.UserId == userId, ct);
+            }
+        }
+
+        if (!row.AutoSync && row.LastCheckedAt == null && row.SyncFrom == null)
+            row.AutoSync = true; // never used: first connect (D13)
+        if (NotPolledStates.Contains(row.State) || row.State is StateBackoff or StateRateLimited)
+        {
+            row.State = StateIdle;
+            row.ConsecutiveFailures = 0;
+            row.LastErrorCode = null;
+        }
+        row.NextSyncAt = row.AutoSync ? FirstRunAt(now) : null;
+        row.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation("[PlaudSync] user={UserId} connected: auto_sync={AutoSync}", userId, row.AutoSync);
+    }
+
+    /// <summary>Called after disconnect: state = disconnected, polling stops. The auto-sync choice and ledger are kept.</summary>
+    public async Task OnAccountDisconnectedAsync(Guid userId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.PlaudSyncs.Where(s => s.UserId == userId)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(s => s.State, StateDisconnected)
+                .SetProperty(s => s.NextSyncAt, (DateTime?)null)
+                .SetProperty(s => s.UpdatedAt, DateTime.UtcNow), ct);
+    }
+
+    /// <summary>
+    /// "Import older…" (spec §5.3): a one-off window [picked date, sync_from) queued as backfill, 25 listed per
+    /// click, under the same claim as Sync now. The picked date is a UTC calendar date, at most 365 days back.
+    /// </summary>
+    public async Task<PlaudSyncRunResult> ImportOlderAsync(Guid userId, DateOnly fromDate, CancellationToken ct = default)
+    {
+        var sync = await EnsureSyncRowAsync(userId, ct);
+        var now = DateTime.UtcNow;
+        var earliest = DateOnly.FromDateTime(now.AddDays(-ImportOlderMaxDaysBack));
+        if (fromDate < earliest)
+            fromDate = earliest;
+        var from = fromDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var to = sync.SyncFrom ?? now;
+        if (from >= to)
+            return new PlaudSyncRunResult(false, 0, 0, await CountWaitingAsync(userId, ct), "nothing_older");
+
+        var claimToken = NewClaimToken();
+        if (!await WaitForClaimAsync(userId, claimToken, ct))
+        {
+            _logger.LogInformation("[PlaudSync] user={UserId} import older skipped: already running", userId);
+            return PlaudSyncRunResult.Busy;
+        }
+        try
+        {
+            return await RunAsync(userId, PlaudSyncTrigger.Backfill, (from, to), ct);
+        }
+        finally
+        {
+            await ReleaseUserClaimAsync(userId, claimToken, CancellationToken.None);
+        }
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────────────────────────
@@ -921,7 +1460,17 @@ public class PlaudSyncService
             State: sync?.State ?? "idle",
             LastErrorCode: sync?.LastErrorCode,
             BackfillDays: sync?.BackfillDays ?? FirmPlaudSync.DefaultBackfillDays,
-            WindowLocked: sync?.SyncFrom != null);
+            WindowLocked: sync?.SyncFrom != null)
+        {
+            AutoSync = sync?.AutoSync ?? false,
+            IntervalMinutes = ClampInterval(sync?.IntervalMinutes ?? DefaultIntervalMinutes),
+            NextSyncAt = sync?.NextSyncAt,
+            LastImportAt = sync?.LastImportAt,
+            LastImportedCount = sync?.LastImportedCount ?? 0,
+            TooLong = Sum(new[] { PlaudImportStatus.TooLong }),
+            NoAudio = Sum(new[] { PlaudImportStatus.NoAudio }),
+            SyncFrom = sync?.SyncFrom,
+        };
     }
 
     /// <summary>"On first sync, import the last N days". Ignored once sync_from is set.</summary>
