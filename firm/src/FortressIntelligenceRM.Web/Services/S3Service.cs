@@ -1,5 +1,6 @@
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.S3.Transfer;
 using System.Text;
 using System.Text.Json;
 
@@ -121,6 +122,26 @@ public class S3Service
         };
         await _s3.PutObjectAsync(request);
         _logger.LogInformation("FIRM: Uploaded stream to S3: {Key}", s3Key);
+        return s3Key;
+    }
+
+    /// <summary>WI #9131 — uploads a (possibly large) recording with TransferUtility, which switches to
+    /// S3 multipart upload above its threshold, instead of a single PutObject. Used by MeetingIngestService.</summary>
+    public async Task<string> UploadLargeStreamAsync(string s3Key, Stream stream, string contentType = "application/octet-stream",
+        CancellationToken cancellationToken = default)
+    {
+        using var transfer = new TransferUtility(_s3);
+        var request = new TransferUtilityUploadRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            InputStream = stream,
+            ContentType = contentType,
+            PartSize = 16 * 1024 * 1024,
+            AutoCloseStream = false
+        };
+        await transfer.UploadAsync(request, cancellationToken);
+        _logger.LogInformation("FIRM: Uploaded stream to S3 (multipart-capable): {Key}", s3Key);
         return s3Key;
     }
 }

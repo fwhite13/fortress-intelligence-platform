@@ -119,6 +119,14 @@ public class FirmDbContext : DbContext
                 .HasDatabaseName("uk_fm_created_by_calendar_event_id")
                 .HasFilter("`calendar_event_id` IS NOT NULL");
 
+            // WI #9131 — external source id (e.g. "plaud:<file_id>") and its per-user dedupe guard.
+            // As above, the DB-level index is created by DatabaseInitializationService's raw SQL.
+            entity.Property(e => e.ExternalId).HasColumnName("external_id").HasMaxLength(128);
+            entity.HasIndex(e => new { e.CreatedBy, e.ExternalId })
+                .IsUnique()
+                .HasDatabaseName("uk_fm_created_by_external_id")
+                .HasFilter("`external_id` IS NOT NULL");
+
             // WI #7033 — multi-user meeting dedup (primary/subscriber model).
             entity.Property(e => e.IsPrimaryRecorder).HasColumnName("is_primary_recorder").HasDefaultValue(true);
             entity.Property(e => e.PrimaryMeetingId).HasColumnName("primary_meeting_id");

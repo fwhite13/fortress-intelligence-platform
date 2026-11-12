@@ -753,6 +753,16 @@ public class MeetingService
         return body?.UserId;
     }
 
+    /// <summary>WI #9131 — the user's meeting imported from an external source (e.g. "plaud:&lt;file_id&gt;"),
+    /// or null. Backs the uk_fm_created_by_external_id dedupe in MeetingIngestService.</summary>
+    public async Task<FirmMeeting?> GetMeetingByExternalIdAsync(Guid userId, string externalId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Meetings.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.CreatedBy == userId && m.ExternalId == externalId);
+    }
+
+    /// <summary>The single delete path for a meeting (UI and DELETE /api/meetings/{id}).</summary>
     public async Task<(bool success, string? error)> RemoveMeetingAsync(long id, Guid userId)
     {
         var meeting = await GetMeetingAsync(id, userId);

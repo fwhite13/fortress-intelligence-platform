@@ -33,6 +33,7 @@ public class MeetingsApiController : ControllerBase
     private readonly IEmailService _emailService;
     private readonly ResummarizeService _resummarizeService;
     private readonly SuggestedEventService _suggestedEventService;
+    private readonly MeetingIngestService _meetingIngestService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -51,7 +52,8 @@ public class MeetingsApiController : ControllerBase
         PdfService pdfService,
         IEmailService emailService,
         ResummarizeService resummarizeService,
-        SuggestedEventService suggestedEventService)
+        SuggestedEventService suggestedEventService,
+        MeetingIngestService meetingIngestService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -70,6 +72,7 @@ public class MeetingsApiController : ControllerBase
         _emailService = emailService;
         _resummarizeService = resummarizeService;
         _suggestedEventService = suggestedEventService;
+        _meetingIngestService = meetingIngestService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -1102,14 +1105,10 @@ public class MeetingsApiController : ControllerBase
         var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
         if (meeting == null) return NotFound(new { error = "Meeting not found" });
 
-        // Allow removing meetings in any terminal state (Scheduled, Complete, Failed)
-        // Reject only if meeting is actively in-progress
-        if (meeting.Status is MeetingStatus.Pending or MeetingStatus.Joining or MeetingStatus.Recording
-            or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
-            return Conflict(new { error = "Cannot remove a meeting that is currently in progress" });
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
+        // WI #9131: one delete path (MeetingService.RemoveMeetingAsync) for the UI and the API. It allows
+        // any terminal state (Scheduled, Complete, Failed) and rejects in-progress meetings.
+        var (success, error) = await _meetingService.RemoveMeetingAsync(id, firmUser.Id);
+        if (!success) return Conflict(new { error = error ?? "Cannot remove a meeting that is currently in progress" });
         return NoContent();
     }
 
@@ -1410,66 +1409,39 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        // Create meeting record
+        // WI #9131: row insert, audio storage and transcription submit live in MeetingIngestService (shared with Plaud).
         var title = !string.IsNullOrWhiteSpace(request.Title)
             ? request.Title
             : $"Recording {(request.RecordedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}";
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var meeting = new FirmMeeting
-        {
-            Title = title,
-            Platform = "mobile",
-            Source = "mobile",
-            MeetingUrl = null,
-            Status = MeetingStatus.Transcribing,
-            CreatedBy = firmUser.Id,
-            CreatorEntraOid = entraOid,
-            StartedAt = request.RecordedAt?.ToUniversalTime() ?? DateTime.UtcNow,
-            EndedAt = request.RecordedAt.HasValue && request.DurationSec.HasValue
-                ? request.RecordedAt.Value.ToUniversalTime().AddSeconds(request.DurationSec.Value)
-                : DateTime.UtcNow,
-            DurationSeconds = request.DurationSec,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-        db.Meetings.Add(meeting);
-        await db.SaveChangesAsync();
+        var ingest = new IngestRequest(
+            CreatedBy: firmUser.Id,
+            CreatorEntraOid: entraOid,
+            Source: "mobile",
+            Platform: "mobile",
+            Title: title,
+            RecordedAtUtc: request.RecordedAt?.ToUniversalTime() ?? DateTime.UtcNow,
+            DurationSeconds: request.DurationSec,
+            ExternalId: null,
+            FileExtension: System.IO.Path.GetExtension(request.Audio.FileName));
 
-        // Upload audio to S3
-        var ext = System.IO.Path.GetExtension(request.Audio.FileName)?.ToLower() ?? ".m4a";
-        var audioKey = $"firm-recordings-dev/{meeting.Id}/audio{ext}";
+        IngestResult result;
         try
         {
             await using var audioStream = request.Audio.OpenReadStream();
-            await _s3Service.UploadStreamAsync(audioKey, audioStream, request.Audio.ContentType ?? "audio/mp4");
-            meeting.AudioS3Key = audioKey;
-            await db.SaveChangesAsync();
+            result = await _meetingIngestService.IngestRecordingAsync(ingest, audioStream, request.Audio.Length,
+                request.Audio.ContentType ?? "audio/mp4", HttpContext.RequestAborted);
         }
-        catch (Exception ex)
+        catch (MeetingIngestStorageException)
         {
-            _logger.LogError(ex, "FIRM: Mobile upload S3 write failed for meeting {MeetingId}", meeting.Id);
-            meeting.Status = MeetingStatus.Failed;
-            meeting.ErrorMessage = "Audio upload to storage failed";
-            await db.SaveChangesAsync();
             return StatusCode(500, new { error = "Failed to store audio file" });
         }
 
-        // Submit Batch transcription job (same path as VP Bot recording_complete)
-        try
-        {
-            var jobId = await _meetingService.SubmitTranscriptionJobAsync(meeting.Id);
-            _logger.LogInformation("FIRM: Mobile upload Batch job {JobId} submitted for meeting {MeetingId}", jobId, meeting.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "FIRM: Mobile upload failed to submit Batch job for meeting {MeetingId}", meeting.Id);
-            // Non-fatal for the response — meeting is created, audio is stored, can retry transcription
-        }
-
+        // A failed transcription submit stays non-fatal for the response, as before: the meeting is created and
+        // the audio is stored, so transcription can be retried.
         return Ok(new
         {
-            meetingId = meeting.Id,
+            meetingId = result.MeetingId,
             status = "transcribing",
             message = "Recording received. Transcript will be ready shortly."
         });
