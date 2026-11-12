@@ -1357,9 +1357,11 @@ public class PlaudSyncService
     }
 
     /// <summary>
-    /// Called after a successful OAuth callback. D13: auto-sync is on by default on first connect (a sync row
-    /// that has never run and was never switched on). A reconnect clears reconnect_needed / disconnected so
-    /// polling resumes, keeping the user's own auto-sync choice.
+    /// Called after a successful OAuth callback. WI #9155 (supersedes D13): auto-sync is OFF on first connect, so a
+    /// newly connected account imports nothing until the user switches auto-sync on, runs Sync now or picks
+    /// recordings. Nothing here runs a sync or writes ledger rows. A reconnect clears reconnect_needed /
+    /// disconnected so polling resumes, keeping the user's own auto-sync choice and interval (a never-used row
+    /// stays off).
     /// </summary>
     public async Task OnAccountConnectedAsync(Guid userId, CancellationToken ct = default)
     {
@@ -1371,16 +1373,17 @@ public class PlaudSyncService
             db.PlaudSyncs.Add(new FirmPlaudSync
             {
                 UserId = userId,
-                AutoSync = true,
+                AutoSync = false,
                 IntervalMinutes = DefaultIntervalMinutes,
-                NextSyncAt = FirstRunAt(now),
+                // Auto-sync off: never due (null).
+                NextSyncAt = ComputeNextSyncAt(false, DefaultIntervalMinutes, StateIdle, 0, null, false, now),
                 State = StateIdle,
                 UpdatedAt = now,
             });
             try
             {
                 await db.SaveChangesAsync(ct);
-                _logger.LogInformation("[PlaudSync] user={UserId} connected: auto_sync=True (default)", userId);
+                _logger.LogInformation("[PlaudSync] user={UserId} connected: auto_sync=False (default)", userId);
                 return;
             }
             catch (DbUpdateException ex) when (CalendarAutoSyncService.IsDuplicateKeyException(ex))
@@ -1390,8 +1393,6 @@ public class PlaudSyncService
             }
         }
 
-        if (!row.AutoSync && row.LastCheckedAt == null && row.SyncFrom == null)
-            row.AutoSync = true; // never used: first connect (D13)
         if (NotPolledStates.Contains(row.State) || row.State is StateBackoff or StateRateLimited)
         {
             row.State = StateIdle;

@@ -117,6 +117,13 @@
                                         }
                                     </MudSelect>
                                 </div>
+                                @* WI #9155 — auto-sync is off on first connect; an off switch is a normal state, not an error. *@
+                                @if (!_plaudAutoSync)
+                                {
+                                    <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
+                                        Auto-sync is off. Nothing is imported until you turn it on.
+                                    </MudText>
+                                }
                                 <div class="d-flex flex-wrap align-center gap-3">
                                     <MudSelect T="int" Label="On first sync, import the last" Dense="true" Style="max-width: 240px;"
                                                Value="@_plaudBackfillDays" ValueChanged="OnPlaudBackfillDaysChanged"
