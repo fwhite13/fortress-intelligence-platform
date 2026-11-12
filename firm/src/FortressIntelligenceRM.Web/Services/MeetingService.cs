@@ -768,6 +768,37 @@ public class MeetingService
         return (true, null);
     }
 
+    /// <summary>Max length of firm_meetings.title (FirmDbContext: HasMaxLength(500)).</summary>
+    public const int MeetingTitleMaxLength = 500;
+
+    /// <summary>
+    /// WI #9130: rename a meeting (any source). Owner-only — same CreatedBy scoping as the other
+    /// meeting edits; another user's id gets "not found" and nothing is written. Updates
+    /// firm_meetings.title only: no re-summarize, and no re-push to the FAIT KB (ruling D24).
+    /// Blank input resets to the default — the title is stored as NULL, which every view renders as
+    /// "Meeting — {date}". Returns the stored title. The title itself is never logged.
+    /// </summary>
+    public async Task<(bool success, string? title, string? error)> RenameMeetingAsync(long id, Guid userId, string? newTitle)
+    {
+        var title = string.IsNullOrWhiteSpace(newTitle) ? null : newTitle.Trim();
+        if (title != null && title.Length > MeetingTitleMaxLength)
+            return (false, null, $"Title is too long (max {MeetingTitleMaxLength} characters)");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
+        if (meeting == null)
+        {
+            _logger.LogWarning("FIRM: rename refused for meeting {MeetingId} — not found or not owned by user {UserId}", id, userId);
+            return (false, null, "Meeting not found or access denied");
+        }
+
+        meeting.Title = title;
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: meeting {MeetingId} renamed by owner (reset to default: {Reset})", id, title == null);
+        return (true, title, null);
+    }
+
     public async Task UpdateModeAsync(long id, string mode)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

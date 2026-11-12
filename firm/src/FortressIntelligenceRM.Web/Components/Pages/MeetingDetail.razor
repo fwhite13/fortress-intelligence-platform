@@ -19,7 +19,7 @@
 @using System.Text.Json
 @using System.Text.Json.Serialization
 
-<PageTitle>@(_meeting?.Title ?? "Meeting") — @Branding.ModuleName</PageTitle>
+<PageTitle>@(_meeting != null ? DisplayTitle(_meeting) : "Meeting") — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
     <MudStack Row AlignItems="AlignItems.Center" Class="mb-4">
@@ -53,9 +53,44 @@
     {
         <MudPaper Style="background: var(--color-bg-page); padding: 24px; margin-bottom: 24px;" Elevation="0">
             <MudStack Row AlignItems="AlignItems.Center" Class="mb-2">
-                <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">
-                    @(_meeting.Title ?? $"Meeting — {_meeting.CreatedAt:yyyy-MM-dd}")
-                </MudText>
+                @if (_editingTitle)
+                {
+                    @* WI #9130: inline rename — Enter or the check saves, Escape or X cancels; blank resets to the default *@
+                    <MudTextField T="string" @bind-Value="_titleDraft"
+                                  Immediate="true" AutoFocus="true"
+                                  MaxLength="@MeetingService.MeetingTitleMaxLength"
+                                  Placeholder="@DefaultTitle(_meeting)"
+                                  HelperText="Leave blank to reset to the default name"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Disabled="_savingTitle"
+                                  OnKeyDown="OnTitleKeyDown"
+                                  Style="color: var(--color-text-primary); font-size: 1.25rem; min-width: 280px; max-width: 720px;" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small"
+                                   Style="color: var(--color-gold);"
+                                   Disabled="_savingTitle"
+                                   OnClick="SaveTitleAsync"
+                                   aria-label="Save title" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                   Style="color: var(--color-text-secondary);"
+                                   Disabled="_savingTitle"
+                                   OnClick="CancelTitleEdit"
+                                   aria-label="Cancel rename" />
+                }
+                else
+                {
+                    <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">
+                        @DisplayTitle(_meeting)
+                    </MudText>
+                    @if (CanRename)
+                    {
+                        <MudTooltip Text="Rename meeting">
+                            <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small"
+                                           Style="color: var(--color-text-secondary);"
+                                           OnClick="StartTitleEdit"
+                                           aria-label="Rename meeting" />
+                        </MudTooltip>
+                    }
+                }
                 <MudSpacer />
                 @StatusBadge(_meeting)
             </MudStack>
@@ -486,6 +521,66 @@
     private bool _helpOpen = false;
     private List<SuggestedEventCard> _suggestedEvents = new();
     private bool IsOrganizer => _meeting != null && _user != null && _meeting.CreatedBy == _user.Id;
+
+    // WI #9130: inline rename. Owner-only in the UI (IsOrganizer) and again in
+    // MeetingService.RenameMeetingAsync (CreatedBy scoping). Works for every source.
+    private bool CanRename => IsOrganizer;
+    private bool _editingTitle = false;
+    private bool _savingTitle = false;
+    private string? _titleDraft;
+
+    // Same default as the meetings list (Meetings.razor) — a NULL title renders as "Meeting — date".
+    private static string DefaultTitle(FirmMeeting m) => $"Meeting — {m.CreatedAt:yyyy-MM-dd}";
+    private static string DisplayTitle(FirmMeeting m) => string.IsNullOrWhiteSpace(m.Title) ? DefaultTitle(m) : m.Title!;
+
+    private void StartTitleEdit()
+    {
+        if (_meeting == null || !CanRename) return;
+        _titleDraft = _meeting.Title;
+        _editingTitle = true;
+    }
+
+    private void CancelTitleEdit()
+    {
+        _editingTitle = false;
+        _titleDraft = null;
+    }
+
+    private async Task OnTitleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveTitleAsync();
+        else if (e.Key == "Escape") CancelTitleEdit();
+    }
+
+    private async Task SaveTitleAsync()
+    {
+        if (_meeting == null || _user == null || _savingTitle || !CanRename) return;
+        _savingTitle = true;
+        try
+        {
+            var (success, title, error) = await MeetingService.RenameMeetingAsync(_meeting.Id, _user.Id, _titleDraft);
+            if (success)
+            {
+                _meeting.Title = title;
+                _editingTitle = false;
+                _titleDraft = null;
+                Snackbar.Add(title == null ? "Title reset to the default." : "Meeting renamed.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(error ?? "Could not rename the meeting.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: rename failed for meeting {MeetingId}", _meeting.Id);
+            Snackbar.Add("Could not rename the meeting. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _savingTitle = false;
+        }
+    }
 
     // WI #8335 — speaker corrections overlay. Saved corrections come from _meeting.SpeakerCorrections;
     // pending ones are local until "Save corrections". The base transcript is never mutated — names
