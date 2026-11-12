@@ -5,8 +5,8 @@
 @inject FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService PlaudOAuthService
 @using FortressIntelligenceRM.Web.Services.Plaud
 @inject PlaudSyncService PlaudSyncService
-@inject Microsoft.Extensions.Options.IOptions<PlaudOptions> PlaudOptions
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <MudDialog>
     <TitleContent>
@@ -100,118 +100,23 @@
                             </MudAlert>
                         }
                         <PlaudAccountGuidance />
-                        @* WI #9134 — manual import: Sync now, first-sync window, basic status. Acts immediately. *@
-                        @if (_plaudStatus is { Connected: true, NeedsReconnect: false, OtherEnvironment: false })
+                        @* WI #9156 — Settings only sets the integration up. Picking recordings, auto-sync and "Check every"
+                           live on the Plaud page (left nav); nothing here imports anything. *@
+                        @if (_plaudStatus is { Connected: true, NeedsReconnect: false, OtherEnvironment: false } && _plaudSync != null)
                         {
-                            <MudPaper Elevation="0" Outlined="true" Class="pa-3 mt-3">
-                                @* WI #9135 — auto-sync switch and "Check every" (10 / 15 / 30 / 60 / 240 min; values below 10 are clamped). *@
-                                <div class="d-flex flex-wrap align-center gap-3 mb-2">
-                                    <MudSwitch T="bool" Value="@_plaudAutoSync" ValueChanged="OnPlaudAutoSyncChanged"
-                                               Label="Automatically sync my Plaud recordings" Color="Color.Warning" />
-                                    <MudSelect T="int" Label="Check every" Dense="true" Style="max-width: 160px;"
-                                               Value="@_plaudInterval" ValueChanged="OnPlaudIntervalChanged"
-                                               Disabled="@(!_plaudAutoSync)">
-                                        @foreach (var m in PlaudSyncService.IntervalChoices)
-                                        {
-                                            <MudSelectItem T="int" Value="@m">@(m >= 60 ? $"{m / 60} h" : $"{m} min")</MudSelectItem>
-                                        }
-                                    </MudSelect>
-                                </div>
-                                @* WI #9155 — auto-sync is off on first connect; an off switch is a normal state, not an error. *@
-                                @if (!_plaudAutoSync)
-                                {
-                                    <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
-                                        Auto-sync is off. Nothing is imported until you turn it on.
-                                    </MudText>
-                                }
-                                <div class="d-flex flex-wrap align-center gap-3">
-                                    <MudSelect T="int" Label="On first sync, import the last" Dense="true" Style="max-width: 240px;"
-                                               Value="@_plaudBackfillDays" ValueChanged="OnPlaudBackfillDaysChanged"
-                                               Disabled="@(_plaudSync?.WindowLocked ?? false)">
-                                        @foreach (var d in FortressIntelligenceRM.Web.Models.FirmPlaudSync.BackfillDayChoices)
-                                        {
-                                            <MudSelectItem T="int" Value="@d">@(d == 1 ? "1 day" : $"{d} days")</MudSelectItem>
-                                        }
-                                    </MudSelect>
-                                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
-                                               OnClick="PlaudSyncNow" Disabled="@_plaudSyncing" StartIcon="@Icons.Material.Filled.CloudDownload">
-                                        @(_plaudSyncing ? "Syncing…" : "Sync now")
-                                    </MudButton>
-                                </div>
-                                @if (_plaudSyncing)
-                                {
-                                    <MudProgressLinear Color="Color.Warning" Indeterminate Class="mt-2" />
-                                }
-                                @if (_plaudSync != null)
-                                {
-                                    @* WI #9135 — full status (spec §5.4, §6.1). *@
-                                    <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--color-text-secondary);">
-                                        @(_plaudSync.LastCheckedAt.HasValue ? $"Last checked {_plaudSync.LastCheckedAt.Value.ToLocalTime():g}" : "Not synced yet")
-                                        @if (_plaudSync.LastImportAt.HasValue)
-                                        {
-                                            <span> · last import @_plaudSync.LastImportAt.Value.ToLocalTime().ToString("g") (@_plaudSync.LastImportedCount)</span>
-                                        }
-                                        · imported @_plaudSync.Imported · @_plaudSync.Waiting waiting
-                                    </MudText>
-                                    @if (_plaudSync.TooLong > 0 || _plaudSync.NoAudio > 0)
-                                    {
-                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
-                                            @if (_plaudSync.TooLong > 0)
-                                            {
-                                                <span>@_plaudSync.TooLong skipped (over @(_plaudMaxHours) h)</span>
-                                            }
-                                            @if (_plaudSync.TooLong > 0 && _plaudSync.NoAudio > 0)
-                                            {
-                                                <span> · </span>
-                                            }
-                                            @if (_plaudSync.NoAudio > 0)
-                                            {
-                                                <span>@_plaudSync.NoAudio skipped (no audio in Plaud)</span>
-                                            }
-                                        </MudText>
-                                    }
-                                    @if (_plaudSync.AutoSync && _plaudSync.NextSyncAt.HasValue && string.IsNullOrEmpty(_plaudSync.LastErrorCode))
-                                    {
-                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
-                                            Next check @_plaudSync.NextSyncAt.Value.ToLocalTime().ToString("t")
-                                        </MudText>
-                                    }
-                                    @if (!string.IsNullOrEmpty(_plaudSync.LastErrorCode))
-                                    {
-                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
-                                            Last sync: @PlaudStatusText(_plaudSync)
-                                        </MudText>
-                                    }
-                                }
-                                @* WI #9135 — "Import older recordings…": one-off window [picked date, current start), 25 per click. *@
-                                <div class="mt-2">
-                                    @if (!_plaudShowOlder)
-                                    {
-                                        <MudLink Typo="Typo.body2" OnClick="@(() => _plaudShowOlder = true)" Style="color: #d4af37; cursor: pointer;">
-                                            Import older recordings…
-                                        </MudLink>
-                                    }
-                                    else
-                                    {
-                                        <div class="d-flex flex-wrap align-center gap-3">
-                                            <MudDatePicker @bind-Date="_plaudOlderDate" Label="Import recordings from" Dense="true"
-                                                           Style="max-width: 220px;" MinDate="@_plaudOlderMin" MaxDate="@_plaudOlderMax" />
-                                            <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;"
-                                                       OnClick="PlaudImportOlder" Disabled="@(_plaudSyncing || _plaudOlderDate == null)"
-                                                       StartIcon="@Icons.Material.Filled.History">
-                                                Import older
-                                            </MudButton>
-                                            <MudButton Variant="Variant.Text" OnClick="@(() => _plaudShowOlder = false)"
-                                                       Style="color: var(--color-text-secondary);">
-                                                Close
-                                            </MudButton>
-                                        </div>
-                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
-                                            Up to @PlaudSyncService.ImportOlderPerClick recordings per click, imported after new ones.
-                                        </MudText>
-                                    }
-                                </div>
-                            </MudPaper>
+                            <MudText Typo="Typo.body2" Class="mt-3" Style="color: var(--color-text-secondary);">
+                                Auto-sync @(_plaudSync.AutoSync ? "on" : "off")
+                                · @(_plaudSync.LastCheckedAt.HasValue ? $"last checked {_plaudSync.LastCheckedAt.Value.ToLocalTime():g}" : "not checked yet")
+                                · imported @_plaudSync.Imported · @_plaudSync.Waiting waiting
+                            </MudText>
+                        }
+                        @if (_plaudStatus is { Connected: true })
+                        {
+                            <div class="mt-2">
+                                <MudLink Typo="Typo.body2" OnClick="OpenPlaudPage" Style="color: #d4af37; cursor: pointer;">
+                                    Choose recordings to import
+                                </MudLink>
+                            </div>
                         }
                         <div class="d-flex flex-wrap gap-2 mt-4">
                             @if (_plaudStatus is { Connected: true })
@@ -304,27 +209,12 @@
     private PlaudAccountStatus? _plaudStatus;
     private bool _plaudConfirmDisconnect;
     private PlaudSyncStatus? _plaudSync;
-    private int _plaudBackfillDays = FortressIntelligenceRM.Web.Models.FirmPlaudSync.DefaultBackfillDays;
-    private bool _plaudSyncing;
-    private int _plaudMaxHours => Math.Max(1, PlaudOptions.Value.MaxDurationMinutes / 60);
-
-    // WI #9135 — auto-sync, interval and Import older.
-    private bool _plaudAutoSync;
-    private int _plaudInterval = PlaudSyncService.DefaultIntervalMinutes;
-    private bool _plaudShowOlder;
-    private DateTime? _plaudOlderDate;
-    private DateTime _plaudOlderMin => DateTime.Today.AddDays(-PlaudSyncService.ImportOlderMaxDaysBack);
-    private DateTime _plaudOlderMax => (_plaudSync?.SyncFrom?.ToLocalTime().Date ?? DateTime.Today).AddDays(-1);
 
     private async Task LoadPlaudSyncStatusAsync()
     {
         try
         {
             _plaudSync = await PlaudSyncService.GetStatusAsync(UserId);
-            _plaudBackfillDays = _plaudSync.BackfillDays;
-            _plaudAutoSync = _plaudSync.AutoSync;
-            // Clamped in the UI too: a stored value below 10 shows (and saves) as 10.
-            _plaudInterval = PlaudSyncService.ClampInterval(_plaudSync.IntervalMinutes);
         }
         catch (Exception)
         {
@@ -333,131 +223,12 @@
         }
     }
 
-    private async Task OnPlaudBackfillDaysChanged(int days)
+    /// <summary>WI #9156 — picking recordings and auto-sync live on the Plaud page; close Settings and go there.</summary>
+    private void OpenPlaudPage()
     {
-        _plaudBackfillDays = days;
-        try
-        {
-            if (!await PlaudSyncService.SetBackfillDaysAsync(UserId, days))
-                Snackbar.Add("The first-sync window is already set.", Severity.Info);
-        }
-        catch (Exception)
-        {
-            Snackbar.Add("Could not save the first-sync window.", Severity.Error);
-        }
-        await LoadPlaudSyncStatusAsync();
+        MudDialog.Cancel();
+        Nav.NavigateTo("/plaud");
     }
-
-    private async Task PlaudSyncNow()
-    {
-        if (_plaudSyncing) return;
-        _plaudSyncing = true;
-        StateHasChanged();
-        try
-        {
-            var result = await PlaudSyncService.SyncNowAsync(UserId, FortressIntelligenceRM.Web.Models.PlaudSyncTrigger.Manual);
-            if (result.AlreadyRunning)
-                Snackbar.Add("A Plaud sync is already running. Try again in a few minutes.", Severity.Info);
-            else if (result.ErrorCode != null && result.Imported == 0 && result.Found == 0)
-                Snackbar.Add($"Plaud sync: {PlaudErrorText(result.ErrorCode)}", Severity.Warning);
-            else
-                Snackbar.Add($"Found {result.Found} new; importing {result.Imported}; {result.Waiting} waiting.", Severity.Success);
-        }
-        catch (Exception)
-        {
-            Snackbar.Add("Plaud sync failed. Try again later.", Severity.Error);
-        }
-        finally
-        {
-            _plaudSyncing = false;
-        }
-        await LoadPlaudSyncStatusAsync();
-    }
-
-    private async Task OnPlaudAutoSyncChanged(bool enabled)
-    {
-        _plaudAutoSync = enabled;
-        try
-        {
-            await PlaudSyncService.SetAutoSyncAsync(UserId, enabled);
-            Snackbar.Add(enabled ? "Plaud auto-sync is on." : "Plaud auto-sync is off.", Severity.Success);
-        }
-        catch (Exception)
-        {
-            Snackbar.Add("Could not save the auto-sync setting.", Severity.Error);
-        }
-        await LoadPlaudSyncStatusAsync();
-    }
-
-    private async Task OnPlaudIntervalChanged(int minutes)
-    {
-        // Clamp before saving (the service clamps again): never below 10 minutes.
-        _plaudInterval = PlaudSyncService.ClampInterval(minutes);
-        try
-        {
-            _plaudInterval = await PlaudSyncService.SetIntervalAsync(UserId, _plaudInterval);
-        }
-        catch (Exception)
-        {
-            Snackbar.Add("Could not save the check interval.", Severity.Error);
-        }
-        await LoadPlaudSyncStatusAsync();
-    }
-
-    private async Task PlaudImportOlder()
-    {
-        if (_plaudSyncing || _plaudOlderDate == null) return;
-        _plaudSyncing = true;
-        StateHasChanged();
-        try
-        {
-            var result = await PlaudSyncService.ImportOlderAsync(UserId, DateOnly.FromDateTime(_plaudOlderDate.Value));
-            if (result.AlreadyRunning)
-                Snackbar.Add("A Plaud sync is already running. Try again in a few minutes.", Severity.Info);
-            else if (result.ErrorCode == "nothing_older")
-                Snackbar.Add("Pick a date before the recordings FIRM already checks.", Severity.Info);
-            else if (result.ErrorCode != null && result.Queued == 0)
-                Snackbar.Add($"Plaud import: {PlaudErrorText(result.ErrorCode)}", Severity.Warning);
-            else
-            {
-                var more = result.MaybeMore ? $"{result.MoreAvailable}+ more available; click again to continue"
-                    : result.MoreAvailable > 0 ? $"{result.MoreAvailable} more available; click again to continue"
-                    : "no more in that range";
-                Snackbar.Add($"{result.Found} found, {result.Queued} queued, {more}.", Severity.Success);
-            }
-        }
-        catch (Exception)
-        {
-            Snackbar.Add("Plaud import failed. Try again later.", Severity.Error);
-        }
-        finally
-        {
-            _plaudSyncing = false;
-        }
-        await LoadPlaudSyncStatusAsync();
-    }
-
-    /// <summary>Last-sync line; backoff and rate limiting show when the next try is due (spec §5.4).</summary>
-    private static string PlaudStatusText(PlaudSyncStatus s)
-    {
-        var at = s.NextSyncAt?.ToLocalTime().ToString("t");
-        return s.State switch
-        {
-            PlaudSyncService.StateRateLimited when at != null => $"Plaud is rate-limiting; retrying at {at}.",
-            PlaudSyncService.StateBackoff when at != null => $"Plaud didn't respond; retrying at {at}.",
-            _ => PlaudErrorText(s.LastErrorCode ?? ""),
-        };
-    }
-
-    private static string PlaudErrorText(string code) => code switch
-    {
-        "rate_limited" => "Plaud is rate-limiting; try again later.",
-        "unauthorized" or "reconnect_needed" => "Plaud needs to be reconnected.",
-        "not_connected" => "No Plaud account connected.",
-        "other_environment" => "Connected on another FIRM environment.",
-        "plaud_unreachable" or "plaud_timeout" or "token_unavailable" => "Plaud didn't respond; try again later.",
-        _ => "Plaud returned an error; try again later.",
-    };
 
     protected override async Task OnInitializedAsync()
     {

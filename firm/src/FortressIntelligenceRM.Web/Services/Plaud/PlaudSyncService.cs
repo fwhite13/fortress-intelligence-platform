@@ -35,6 +35,20 @@ public record PlaudSyncStatus(int Imported, int Waiting, int Skipped, DateTime? 
 }
 
 /// <summary>
+/// WI #9156 — one live list_files window for the Plaud page. <see cref="Files"/> is newest first and stays on
+/// the server (Blazor Server component state); titles are displayed to the signed-in user only, never logged.
+/// <see cref="ErrorCode"/> is a short code (rate_limited, reconnect_needed, plaud_error...) or null.
+/// </summary>
+public record PlaudListResult(IReadOnlyList<PlaudFileInfo> Files, bool MaybeMore, string? ErrorCode);
+
+/// <summary>WI #9156 — the ledger fields the Plaud page needs to show a row's state (no title, no Plaud body).</summary>
+public record PlaudLedgerState(string Status, long? MeetingId, DateTime? DeletedAt, string? ErrorCode);
+
+/// <summary>WI #9156 — outcome of "Import selected" / Retry on the Plaud page.</summary>
+public record PlaudQueueResult(int Queued, int Requeued, int Skipped, int Remaining, int Imported, bool AlreadyRunning,
+    string? ErrorCode);
+
+/// <summary>
 /// WI #9135 — per-instance Plaud pacing (spec §5.4), a singleton shared by every Plaud MCP call in this process:
 ///   - token bucket of <see cref="RequestsPerMinute"/> (30) requests per minute; callers wait for a token;
 ///   - instance circuit: <see cref="CircuitThreshold"/> (3) × 429 within <see cref="CircuitWindow"/> (5 min)
@@ -279,8 +293,10 @@ public class PlaudSyncService
         var staleBefore = now - UserClaimStaleAfter;
         var target = db.PlaudSyncs
             .Where(s => s.UserId == userId && (s.ClaimedAt == null || s.ClaimedAt < staleBefore));
+        // WI #9156: next_sync_at is the gate. It is only set while auto-sync is on, or while recordings picked on
+        // the Plaud page are still waiting (that run imports them and never lists, see RunAsync).
         if (requireDue)
-            target = target.Where(s => s.AutoSync && s.NextSyncAt != null && s.NextSyncAt <= now
+            target = target.Where(s => s.NextSyncAt != null && s.NextSyncAt <= now
                                        && !NotPolledStates.Contains(s.State));
         var rows = await target.ExecuteUpdateAsync(u => u
             .SetProperty(s => s.ClaimedBy, claimToken)
@@ -312,7 +328,8 @@ public class PlaudSyncService
     // ── One run ──────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// WI #9135 — users the background poller should run now (spec §5.2): auto_sync = 1, state not in
+    /// WI #9135 — users the background poller should run now (spec §5.2): next_sync_at set (WI #9156: auto-sync on,
+    /// or recordings picked on the Plaud page still waiting), state not in
     /// (reconnect_needed, disconnected), next_sync_at &lt;= now, joined to an account row whose oauth_env is this
     /// instance's redirect host (dev and prod share the DB, spec §9.2) and that does not need a reconnect.
     /// Unclaimed (or stale-claimed) users only, soonest first, at most <see cref="DueUsersPerTick"/> (LIMIT 5).
@@ -328,8 +345,9 @@ public class PlaudSyncService
         return await (
                 from s in db.PlaudSyncs
                 join a in db.PlaudAccounts on s.UserId equals a.UserId
-                where s.AutoSync
-                      && !NotPolledStates.Contains(s.State)
+                // WI #9156: no auto_sync condition; next_sync_at is non-null only while auto-sync is on or
+                // picked recordings are still waiting (WriteRunStatusAsync, SetAutoSyncAsync, QueueSelectedAsync).
+                where !NotPolledStates.Contains(s.State)
                       && s.NextSyncAt != null && s.NextSyncAt <= now
                       && a.OAuthEnv == envHost
                       && !a.NeedsReconnect
@@ -347,9 +365,12 @@ public class PlaudSyncService
     /// <summary>
     /// One run. With <paramref name="olderWindow"/> ("Import older…") step 2 lists that one-off window
     /// instead of the regular one and queues at most 25 new rows as backfill.
+    /// WI #9156: the regular window is listed only while auto-sync is on. With auto-sync off (or with
+    /// <paramref name="importOnly"/>, the Plaud page) a run skips step 2 and only imports rows already in the
+    /// ledger, so a recording the user did not pick is never pulled in.
     /// </summary>
     private async Task<PlaudSyncRunResult> RunAsync(Guid userId, string trigger, (DateTime From, DateTime To)? olderWindow,
-        CancellationToken ct)
+        CancellationToken ct, bool importOnly = false)
     {
         trigger = trigger is PlaudSyncTrigger.Auto or PlaudSyncTrigger.Backfill ? trigger : PlaudSyncTrigger.Manual;
         var sync = await EnsureSyncRowAsync(userId, ct);
@@ -387,7 +408,7 @@ public class PlaudSyncService
                 var older = await ListOlderWindowAsync(session, userId, w.From, w.To, ct);
                 (found, queued, more, maybeMore) = (older.Found, older.Queued, older.More, older.MaybeMore);
             }
-            else
+            else if (!importOnly && sync.AutoSync)
             {
                 found = await ListWindowAsync(session, userId, sync, trigger, ct);
             }
@@ -1244,9 +1265,26 @@ public class PlaudSyncService
             row.LastImportAt = now;
             row.LastImportedCount = importedCount;
         }
-        row.NextSyncAt = ComputeNextSyncAt(row.AutoSync, row.IntervalMinutes, state, row.ConsecutiveFailures,
-            retryAfter, backlog, now);
+        // WI #9156: with auto-sync off, recordings picked on the Plaud page that are still waiting keep the user
+        // scheduled (queued: 2-min backlog recheck; pending audio / failed retries: the interval), so they drain
+        // even after the page is closed. Those runs never list (RunAsync).
+        var (manualQueued, manualRetry) = row.AutoSync ? (false, false) : await HasManualWorkAsync(db, userId);
+        row.NextSyncAt = ComputeNextSyncAt(row.AutoSync || manualQueued || manualRetry, row.IntervalMinutes, state,
+            row.ConsecutiveFailures, retryAfter, backlog || manualQueued, now);
         await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>WI #9156 — ledger rows that still need a run: queued, and pending_audio / submit_failed / due failed.</summary>
+    private static async Task<(bool Queued, bool Retry)> HasManualWorkAsync(FirmDbContext db, Guid userId)
+    {
+        var queued = await db.PlaudImports.AnyAsync(r => r.UserId == userId && r.Status == PlaudImportStatus.Queued,
+            CancellationToken.None);
+        var retry = !queued && await db.PlaudImports.AnyAsync(r => r.UserId == userId
+            && (r.Status == PlaudImportStatus.PendingAudio
+                || r.Status == PlaudImportStatus.SubmitFailed
+                || (r.Status == PlaudImportStatus.Failed && r.Attempts < MaxFailedAttempts && r.NextAttemptAt != null)),
+            CancellationToken.None);
+        return (queued, retry);
     }
 
     /// <summary>
@@ -1320,16 +1358,28 @@ public class PlaudSyncService
     // ── Auto-sync settings (WI #9135, spec §6.1) ─────────────────────────────────────────────────
 
     /// <summary>
-    /// "Automatically sync my Plaud recordings". On: first run at now + U(0, 2 min) (sync_from is set by that
-    /// first run from "On first sync, import the last", so the window stays choosable until then). Off: clears
-    /// next_sync_at, so the poller never selects the user.
+    /// "Automatically import new recordings" (WI #9156: the switch lives on the Plaud page). On: sync_from = now
+    /// when it is null or older, so only recordings made from this moment on flow in by themselves (no backfill;
+    /// older ones stay pickable on the page); first run at now + U(0, 2 min). Off: polling (list_files) stops;
+    /// next_sync_at is cleared unless recordings the user picked are still waiting, which keep draining.
     /// </summary>
     public async Task SetAutoSyncAsync(Guid userId, bool enabled, CancellationToken ct = default)
     {
         await EnsureSyncRowAsync(userId, ct);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var now = DateTime.UtcNow;
-        var next = enabled ? FirstRunAt(now) : (DateTime?)null;
+        DateTime? next;
+        if (enabled)
+        {
+            next = FirstRunAt(now);
+            await db.PlaudSyncs.Where(s => s.UserId == userId && (s.SyncFrom == null || s.SyncFrom < now))
+                .ExecuteUpdateAsync(u => u.SetProperty(s => s.SyncFrom, now), ct);
+        }
+        else
+        {
+            var (queued, retry) = await HasManualWorkAsync(db, userId);
+            next = queued ? now + BacklogRecheck : retry ? now + TimeSpan.FromMinutes(DefaultIntervalMinutes) : null;
+        }
         await db.PlaudSyncs.Where(s => s.UserId == userId)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(s => s.AutoSync, enabled)
@@ -1446,6 +1496,242 @@ public class PlaudSyncService
         {
             await ReleaseUserClaimAsync(userId, claimToken, CancellationToken.None);
         }
+    }
+
+    // ── WI #9156: Plaud page (left nav) ──────────────────────────────────────────────────────────
+
+    /// <summary>Recordings per click on the Plaud page: the existing "Import older" cap.</summary>
+    public const int QueueSelectedPerClick = ImportOlderPerClick;
+    /// <summary>The Plaud page lists 30 days at a time ("Load older" adds 30 more) up to 365 days back.</summary>
+    public const int ListWindowDays = 30;
+
+    /// <summary>
+    /// Cheap nav check (no Plaud call): the signed-in user, by Entra object id from the authenticated principal,
+    /// has a firm_plaud_accounts row. A row with needs_reconnect = 1 still counts (the page shows Reconnect).
+    /// </summary>
+    public async Task<bool> HasAccountAsync(string entraOid, CancellationToken ct = default)
+    {
+        if (!_options.Enabled || string.IsNullOrEmpty(entraOid))
+            return false;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await (from u in db.Users
+                      join a in db.PlaudAccounts on u.Id equals a.UserId
+                      where u.EntraOid == entraOid
+                      select a.Id).AnyAsync(ct);
+    }
+
+    /// <summary>
+    /// Lists the user's recordings live through list_files for [<paramref name="fromUtc"/>, <paramref name="toUtc"/>),
+    /// newest first (at most 10 pages of 20). Never throws for Plaud trouble: a 429, a 401 that survives one
+    /// refresh, or an upstream error comes back as <see cref="PlaudListResult.ErrorCode"/>. Read-only: no ledger
+    /// rows are written. Logs carry the user id, counts and codes only.
+    /// </summary>
+    public async Task<PlaudListResult> ListRecordingsAsync(Guid userId, DateTime fromUtc, DateTime toUtc,
+        CancellationToken ct = default)
+    {
+        var earliest = DateTime.UtcNow.AddDays(-ImportOlderMaxDaysBack - 1);
+        if (fromUtc < earliest)
+            fromUtc = earliest;
+        if (fromUtc >= toUtc)
+            return new PlaudListResult(Array.Empty<PlaudFileInfo>(), false, null);
+
+        var token = await _oauth.GetAccessTokenAsync(userId, false, ct);
+        if (token == null)
+        {
+            var status = await _oauth.GetStatusAsync(userId, ct);
+            var code = !status.Connected ? "not_connected"
+                : status.NeedsReconnect ? "reconnect_needed"
+                : status.OtherEnvironment ? "other_environment"
+                : "token_unavailable";
+            return new PlaudListResult(Array.Empty<PlaudFileInfo>(), false, code);
+        }
+
+        string? errorCode = null;
+        var maybeMore = false;
+        var inWindow = new Dictionary<string, PlaudFileInfo>(StringComparer.Ordinal);
+        try
+        {
+            var session = await OpenSessionAsync(userId, token, ct);
+            // date_from/date_to are date-granular with an unverified timezone: widen by a day each side, then
+            // filter on the parsed timestamp.
+            var dateFrom = DateOnly.FromDateTime(fromUtc.AddDays(-1));
+            var dateTo = DateOnly.FromDateTime(toUtc.AddDays(1));
+            for (var page = 1; page <= ImportOlderMaxPages; page++)
+            {
+                var (files, full) = await _mcp.ListFilesAsync(session, dateFrom, dateTo, page, PageSize, ct);
+                foreach (var f in files)
+                {
+                    if ((f.StartAt ?? f.CreatedAt) is { } at && at >= fromUtc && at < toUtc)
+                        inWindow.TryAdd(f.Id, f);
+                }
+                if (!full)
+                    break;
+                if (page == ImportOlderMaxPages)
+                    maybeMore = true;
+            }
+        }
+        catch (PlaudReconnectNeededException)
+        {
+            errorCode = "reconnect_needed";
+        }
+        catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            // The instance circuit is counted by PlaudRateLimiter; the page shows "try again" with a Retry.
+            errorCode = "rate_limited";
+        }
+        catch (PlaudMcpException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            errorCode = (await _oauth.GetStatusAsync(userId, CancellationToken.None)).NeedsReconnect
+                ? "reconnect_needed"
+                : "unauthorized";
+        }
+        catch (PlaudMcpException ex)
+        {
+            errorCode = ex.StatusCode.HasValue ? $"plaud_{(int)ex.StatusCode.Value}" : "plaud_error";
+        }
+        catch (HttpRequestException)
+        {
+            errorCode = "plaud_unreachable";
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            errorCode = "plaud_timeout";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errorCode = "list_error";
+            _logger.LogWarning("[PlaudSync] user={UserId} list failed: {Error}", userId, ex.GetType().Name);
+        }
+
+        var ordered = inWindow.Values
+            .OrderByDescending(f => f.StartAt ?? f.CreatedAt)
+            .ToList();
+        _logger.LogInformation("[PlaudSync] user={UserId} page list days={Days} found={Found} maybeMore={MaybeMore} code={Code}",
+            userId, (int)Math.Round((toUtc - fromUtc).TotalDays), ordered.Count, maybeMore, errorCode ?? "-");
+        return new PlaudListResult(ordered, maybeMore, errorCode);
+    }
+
+    /// <summary>The user's ledger rows for these file ids (status, meeting link, tombstone). One query, no Plaud call.</summary>
+    public async Task<Dictionary<string, PlaudLedgerState>> GetLedgerStatesAsync(Guid userId,
+        IReadOnlyCollection<string> fileIds, CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, PlaudLedgerState>(StringComparer.Ordinal);
+        if (fileIds.Count == 0)
+            return result;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var ids = fileIds.Distinct(StringComparer.Ordinal).ToList();
+        var rows = await db.PlaudImports.AsNoTracking()
+            .Where(r => r.UserId == userId && ids.Contains(r.PlaudFileId))
+            .Select(r => new { r.PlaudFileId, r.Status, r.MeetingId, r.DeletedAt, r.ErrorCode })
+            .ToListAsync(ct);
+        foreach (var r in rows)
+            result[r.PlaudFileId] = new PlaudLedgerState(r.Status, r.MeetingId, r.DeletedAt, r.ErrorCode);
+        return result;
+    }
+
+    /// <summary>
+    /// "Import selected" / Retry on the Plaud page. <paramref name="loaded"/> is the listing this component
+    /// fetched (kept on the server by Blazor Server); any id not in it is dropped. Each id is re-checked against
+    /// the ledger: no row → a new queued row (trigger_kind = 'manual'; recorded_at, title and duration from the
+    /// listing); a failed row → re-queued (Retry); any other row (imported, deleted, in flight, too long, no
+    /// audio) is skipped. Over the length cap from the listing → skipped. At most
+    /// <see cref="QueueSelectedPerClick"/> (25) per click, oldest first; the rest come back as Remaining.
+    /// Then runs the existing processing step (import only, never lists) under the same per-user claim as Sync
+    /// now; if another run holds the claim, the rows stay queued and the poller picks them up (next_sync_at).
+    /// The user id is the caller's authenticated user, never a value from the browser.
+    /// </summary>
+    public async Task<PlaudQueueResult> QueueSelectedAsync(Guid userId, IReadOnlyCollection<string> fileIds,
+        IReadOnlyCollection<PlaudFileInfo> loaded, CancellationToken ct = default)
+    {
+        var loadedById = new Dictionary<string, PlaudFileInfo>(StringComparer.Ordinal);
+        foreach (var f in loaded)
+            loadedById.TryAdd(f.Id, f);
+        var picked = fileIds.Distinct(StringComparer.Ordinal)
+            .Where(loadedById.ContainsKey)
+            .Select(id => loadedById[id])
+            .ToList();
+        var dropped = fileIds.Distinct(StringComparer.Ordinal).Count() - picked.Count;
+        var maxMs = (long)_options.MaxDurationMinutes * 60_000L;
+
+        var ledger = await GetLedgerStatesAsync(userId, picked.Select(f => f.Id).ToList(), ct);
+        var candidates = picked
+            .Where(f => !(f.DurationMs is long ms && ms > maxMs))
+            .Where(f => !ledger.TryGetValue(f.Id, out var s) || (s.Status == PlaudImportStatus.Failed && s.DeletedAt == null))
+            .OrderBy(f => f.StartAt ?? f.CreatedAt ?? DateTime.MaxValue)
+            .ToList();
+        var skipped = dropped + picked.Count - candidates.Count;
+        var thisClick = candidates.Take(QueueSelectedPerClick).ToList();
+        var remaining = candidates.Count - thisClick.Count;
+
+        var fresh = thisClick.Where(f => !ledger.ContainsKey(f.Id)).ToList();
+        var retry = thisClick.Where(f => ledger.ContainsKey(f.Id)).Select(f => f.Id).ToList();
+
+        await EnsureSyncRowAsync(userId, ct);
+        var queued = await InsertLedgerRowsAsync(userId, fresh, PlaudSyncTrigger.Manual, ct);
+        var requeued = await RequeueFailedAsync(userId, retry, ct);
+        _logger.LogInformation("[PlaudSync] user={UserId} page import picked={Picked} queued={Queued} requeued={Requeued} skipped={Skipped} remaining={Remaining}",
+            userId, picked.Count, queued, requeued, skipped, remaining);
+        if (queued + requeued == 0)
+            return new PlaudQueueResult(0, 0, skipped, remaining, 0, false, null);
+
+        // The poller is the safety net: if the claim is busy, or the caps stop this run early, the rows still drain.
+        await ScheduleSoonAsync(userId, ct);
+
+        var claimToken = NewClaimToken();
+        if (!await WaitForClaimAsync(userId, claimToken, ct))
+        {
+            _logger.LogInformation("[PlaudSync] user={UserId} page import: run already in progress; rows left queued", userId);
+            return new PlaudQueueResult(queued, requeued, skipped, remaining, 0, true, null);
+        }
+        try
+        {
+            var run = await RunAsync(userId, PlaudSyncTrigger.Manual, olderWindow: null, ct, importOnly: true);
+            return new PlaudQueueResult(queued, requeued, skipped, remaining, run.Imported, false, run.ErrorCode);
+        }
+        finally
+        {
+            await ReleaseUserClaimAsync(userId, claimToken, CancellationToken.None);
+        }
+    }
+
+    /// <summary>Retry: failed rows go back to queued (or submit_failed when the meeting and audio exist) with a fresh attempt count.</summary>
+    private async Task<int> RequeueFailedAsync(Guid userId, List<string> fileIds, CancellationToken ct)
+    {
+        if (fileIds.Count == 0)
+            return 0;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
+        var rows = await db.PlaudImports
+            .Where(r => r.UserId == userId && fileIds.Contains(r.PlaudFileId)
+                        && r.Status == PlaudImportStatus.Failed && r.DeletedAt == null)
+            .ToListAsync(ct);
+        foreach (var row in rows)
+        {
+            // A meeting that exists already (submit retries ran out) only needs the Batch submit again;
+            // re-ingesting would dedupe on external_id and never submit.
+            row.Status = row.MeetingId != null ? PlaudImportStatus.SubmitFailed : PlaudImportStatus.Queued;
+            row.Attempts = 0;
+            row.ErrorCode = null;
+            row.NextAttemptAt = row.MeetingId != null ? now : null;
+            row.ClaimedAt = null;
+            row.TriggerKind = PlaudSyncTrigger.Manual;
+            row.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+        foreach (var row in rows)
+            _logger.LogInformation("[PlaudSync] user={UserId} file={FileId} status={Status} (retry from page)", userId, row.PlaudFileId, row.Status);
+        return rows.Count;
+    }
+
+    /// <summary>Pulls next_sync_at in to the backlog recheck so the poller drains queued rows (auto-sync on or off).</summary>
+    private async Task ScheduleSoonAsync(Guid userId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var soon = DateTime.UtcNow + BacklogRecheck;
+        await db.PlaudSyncs
+            .Where(s => s.UserId == userId && !NotPolledStates.Contains(s.State)
+                        && (s.NextSyncAt == null || s.NextSyncAt > soon))
+            .ExecuteUpdateAsync(u => u.SetProperty(s => s.NextSyncAt, soon), ct);
     }
 
     // ── Settings ─────────────────────────────────────────────────────────────────────────────────
