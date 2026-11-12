@@ -1,0 +1,13 @@
+@* WI #9133 — what connecting Plaud does (spec §6.1, D1: short and factual). OrgName is
+   "Fortress" for FIRM and "Refuge" for RN (Branding__OrgName). *@
+@inject BrandingConfig Branding
+
+<MudStack Spacing="1">
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
+        Connect your own Plaud account. @Branding.OrgName FIRM downloads the audio of your Plaud recordings and
+        processes it like your other meetings: transcript, speaker names, summary, and your knowledge-base settings.
+    </MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+        FIRM never changes anything in Plaud. Recordings must be synced to the Plaud cloud.
+    </MudText>
+</MudStack>
