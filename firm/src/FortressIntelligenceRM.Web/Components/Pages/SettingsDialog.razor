@@ -2,6 +2,8 @@
 @using FortressIntelligenceRM.Web.Services
 @inject MeetingService MeetingService
 @inject IZoomOAuthService ZoomOAuthService
+@inject FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService PlaudOAuthService
+@using FortressIntelligenceRM.Web.Services.Plaud
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -67,6 +69,92 @@
                         }
                     </div>
                 </MudTabPanel>
+                @* WI #9133 — per-user Plaud account link; hidden unless Firm:Plaud:Enabled. Acts immediately like Zoom. *@
+                @if (PlaudOAuthService.IsEnabled)
+                {
+                    <MudTabPanel Text="Plaud">
+                        @if (_plaudStatus is { Connected: true, OtherEnvironment: true })
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                Connected on another FIRM environment. Reconnect here to sync from here.
+                            </MudAlert>
+                        }
+                        else if (_plaudStatus is { Connected: true, NeedsReconnect: true })
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                                Plaud needs to be reconnected.
+                            </MudAlert>
+                        }
+                        else if (_plaudStatus is { Connected: true })
+                        {
+                            <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
+                                Connected as <strong>@(_plaudStatus.Email ?? "your Plaud account")</strong>
+                            </MudAlert>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                                No Plaud account connected.
+                            </MudAlert>
+                        }
+                        <PlaudAccountGuidance />
+                        <div class="d-flex flex-wrap gap-2 mt-4">
+                            @if (_plaudStatus is { Connected: true })
+                            {
+                                @if (_plaudStatus.NeedsReconnect || _plaudStatus.OtherEnvironment)
+                                {
+                                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                               Href="/oauth/plaud/authorize" StartIcon="@Icons.Material.Filled.Refresh">
+                                        Reconnect Plaud
+                                    </MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;"
+                                               Href="/oauth/plaud/authorize" StartIcon="@Icons.Material.Filled.Sync">
+                                        Switch Account
+                                    </MudButton>
+                                }
+                                @if (!_plaudConfirmDisconnect)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                                               OnClick="@(() => _plaudConfirmDisconnect = true)"
+                                               StartIcon="@Icons.Material.Filled.LinkOff">
+                                        Disconnect
+                                    </MudButton>
+                                }
+                            }
+                            else
+                            {
+                                <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                           Href="/oauth/plaud/authorize" StartIcon="@Icons.Material.Filled.Mic">
+                                    Connect Plaud Account
+                                </MudButton>
+                            }
+                        </div>
+                        @if (_plaudStatus is { Connected: true } && _plaudConfirmDisconnect)
+                        {
+                            @* In-page confirmation; confirm() is not used (spec §6.1). *@
+                            <MudPaper Elevation="0" Outlined="true" Class="pa-3 mt-3">
+                                <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
+                                    Meetings already imported stay in FIRM. To revoke FIRM's access completely, also remove it in your Plaud account settings.
+                                </MudText>
+                                <div class="d-flex gap-2 mt-2">
+                                    <form method="post" action="/oauth/plaud/disconnect">
+                                        <MudButton Variant="Variant.Filled" Color="Color.Error" ButtonType="ButtonType.Submit"
+                                                   StartIcon="@Icons.Material.Filled.LinkOff">
+                                            Disconnect Plaud
+                                        </MudButton>
+                                    </form>
+                                    <MudButton Variant="Variant.Text" OnClick="@(() => _plaudConfirmDisconnect = false)"
+                                               Style="color: var(--color-text-secondary);">
+                                        Keep connected
+                                    </MudButton>
+                                </div>
+                            </MudPaper>
+                        }
+                    </MudTabPanel>
+                }
                 @if (!string.IsNullOrEmpty(_entraOid))
                 {
                     @* WI #8298 — voice enrollment acts immediately; Save only covers the General tab. *@
@@ -98,6 +186,8 @@
     private string _entraOid = "";
     private string _displayName = "";
     private FirmZoomOAuth? _zoomConnection;
+    private PlaudAccountStatus? _plaudStatus;
+    private bool _plaudConfirmDisconnect;
 
     protected override async Task OnInitializedAsync()
     {
@@ -111,6 +201,25 @@
             _displayName = user.DisplayName;
         }
         _zoomConnection = await ZoomOAuthService.GetConnectionAsync(UserId);
+        if (PlaudOAuthService.IsEnabled)
+        {
+            try
+            {
+                _plaudStatus = await PlaudOAuthService.GetStatusAsync(UserId);
+                if (_plaudStatus is { Connected: true, NeedsReconnect: false, OtherEnvironment: false })
+                {
+                    // Lazily refresh an expiring token (one locked refresh), so a dead grant shows "Reconnect" here.
+                    var token = await PlaudOAuthService.GetAccessTokenAsync(UserId);
+                    if (token == null)
+                        _plaudStatus = await PlaudOAuthService.GetStatusAsync(UserId);
+                }
+            }
+            catch (Exception)
+            {
+                // Status display only; never block the dialog on Plaud.
+                _plaudStatus ??= new PlaudAccountStatus(false, null, false, false);
+            }
+        }
         _loading = false;
     }
 

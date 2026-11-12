@@ -10,6 +10,7 @@
 @inject AutoJoinSchedulerService AutoJoinScheduler
 @inject BrandingConfig Branding
 @inject IZoomOAuthService ZoomOAuthService
+@inject FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService PlaudOAuthService
 
 @inject CalendarService CalendarService
 @inject IJSRuntime JS
@@ -268,6 +269,14 @@
             Snackbar.Add("Failed to connect Zoom account. Please try again.", Severity.Error);
         else if (zoomOAuthQuery.ContainsKey("zoomDisconnected"))
             Snackbar.Add("Zoom account disconnected.", Severity.Info);
+        // WI #9133 — Plaud link results; plaudConnected is announced once the user resolves (names the account).
+        if (PlaudOAuthService.IsEnabled)
+        {
+            if (zoomOAuthQuery.ContainsKey("plaudConnectError"))
+                Snackbar.Add("Failed to connect Plaud account. Please try again.", Severity.Error);
+            else if (zoomOAuthQuery.ContainsKey("plaudDisconnected"))
+                Snackbar.Add("Plaud account disconnected. Meetings already imported stay in FIRM.", Severity.Info);
+        }
 
         try
         {
@@ -306,6 +315,8 @@
 
                     if (firmUser != null)
                         await LoadZoomStatusAsync(firmUser.Id, zoomOAuthQuery.ContainsKey("zoomConnected"));
+                    if (firmUser != null && PlaudOAuthService.IsEnabled && zoomOAuthQuery.ContainsKey("plaudConnected"))
+                        await AnnouncePlaudConnectedAsync(firmUser.Id);
                 }
                 catch (Exception dbEx)
                 {
@@ -350,6 +361,20 @@
             Snackbar.Add(_zoomConnection != null
                 ? $"Zoom account connected as {ZoomAccountLabel}. Join Zoom meetings using this account for the notetaker to record."
                 : "Zoom account connected.", Severity.Success);
+    }
+
+    private async Task AnnouncePlaudConnectedAsync(Guid userId)
+    {
+        string? email = null;
+        try
+        {
+            email = (await PlaudOAuthService.GetStatusAsync(userId)).Email;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "FIRM Meetings: failed to load Plaud connection status for user {UserId}", userId);
+        }
+        Snackbar.Add(email != null ? $"Plaud connected as {email}" : "Plaud connected.", Severity.Success);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
