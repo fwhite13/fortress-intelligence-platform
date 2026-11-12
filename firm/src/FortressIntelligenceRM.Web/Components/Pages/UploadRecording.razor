@@ -52,11 +52,13 @@
                 <MudAlert Severity="Severity.Error" Dense="true">@_fileError</MudAlert>
             }
 
+            @* Stable ids: the script reads these inputs' values at start (WI #9139-b), not the bound fields. *@
             <MudTextField @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Disabled="@Busy"
-                          MaxLength="500" Immediate="true" />
+                          MaxLength="500" Immediate="true" UserAttributes="@TitleInputAttrs" />
 
             <MudTextField @bind-Value="_recordedAtLocal" Label="Recorded at" Variant="Variant.Outlined"
                           InputType="InputType.DateTimeLocal" Disabled="@Busy" Immediate="true"
+                          UserAttributes="@RecordedAtInputAttrs"
                           HelperText="Defaults to the file's date. Change it if the recording was made at another time." />
 
             @if (_phase != Phase.Idle)
@@ -119,6 +121,10 @@
 
 @code {
     private const string InputId = "firm-upload-file";
+    private const string TitleInputId = "firm-upload-title";
+    private const string RecordedAtInputId = "firm-upload-recorded-at";
+    private static readonly Dictionary<string, object> TitleInputAttrs = new() { ["id"] = TitleInputId };
+    private static readonly Dictionary<string, object> RecordedAtInputAttrs = new() { ["id"] = RecordedAtInputId };
 
     private enum Phase { Idle, Uploading, Paused, Finishing }
 
@@ -131,6 +137,8 @@
     private string? _fileError;
     private string? _uploadError;
     private string _title = "";
+    // The stem OnFileSelected last put into _title. A title that differs from it was typed by the user.
+    private string _autoTitle = "";
     private string _recordedAtLocal = "";
     private long _sent;
     private long _total;
@@ -154,14 +162,23 @@
     }
 
     [JSInvokable]
-    public Task OnFileSelected(string stem, string ext, long size, string contentType, string lastModifiedLocal)
+    public Task OnFileSelected(string stem, string ext, long size, string contentType, string lastModifiedLocal,
+        string? currentTitle)
     {
         _doneMeetingId = null;
         _uploadError = null;
         _fileSelected = true;
         _fileExt = ext ?? "";
         _fileSize = size;
-        _title = stem ?? "";
+        // WI #9139-b: never replace a title the user typed. currentTitle is the Title input's DOM value when the
+        // file was picked; keystrokes may not have reached _title over the circuit yet (Android IME).
+        if (!string.IsNullOrWhiteSpace(currentTitle) && currentTitle != _title)
+            _title = currentTitle;
+        if (string.IsNullOrWhiteSpace(_title) || _title == _autoTitle)
+        {
+            _title = stem ?? "";
+            _autoTitle = _title;
+        }
         _recordedAtLocal = lastModifiedLocal ?? "";
         // Same allow-list and size cap as the server (which checks again).
         _fileError = Uploads.Validate("f" + _fileExt, contentType, size);
@@ -234,7 +251,13 @@
         try
         {
             var error = await JS.InvokeAsync<string?>("firmUpload.start", InputId,
-                new { title = _title?.Trim() ?? "", recordedAtLocal = _recordedAtLocal });
+                new
+                {
+                    title = _title?.Trim() ?? "",
+                    recordedAtLocal = _recordedAtLocal,
+                    titleInputId = TitleInputId,
+                    recordedAtInputId = RecordedAtInputId
+                });
             if (error != null)
             {
                 _uploadError = error;
@@ -266,6 +289,7 @@
         _fileError = null;
         _uploadError = null;
         _title = "";
+        _autoTitle = "";
         _recordedAtLocal = "";
         _sent = 0;
         _total = 0;
