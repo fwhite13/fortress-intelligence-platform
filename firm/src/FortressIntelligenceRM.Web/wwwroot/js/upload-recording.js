@@ -47,6 +47,16 @@ window.firmUpload = (function () {
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
+    // WI #9139-b: the trimmed value of a text input by id ('' if missing). Accepts the input itself or a wrapper
+    // around it, in case a component library puts the id on the container.
+    const TITLE_INPUT_ID = 'firm-upload-title';
+    function inputValue(id) {
+        if (!id) return '';
+        let el = document.getElementById(id);
+        if (el && !('value' in el)) el = el.querySelector('input, textarea');
+        return el && typeof el.value === 'string' ? el.value.trim() : '';
+    }
+
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async function readError(res) {
@@ -170,13 +180,17 @@ window.firmUpload = (function () {
                 const dot = f.name.lastIndexOf('.');
                 const stem = dot > 0 ? f.name.substring(0, dot) : f.name;
                 const ext = dot > 0 ? f.name.substring(dot).toLowerCase() : '';
-                call('OnFileSelected', stem, ext, f.size, f.type || '', toLocalInput(f.lastModified || Date.now()));
+                // The Title input's current value goes along so a title typed before (or while) picking the file
+                // is kept even if its keystrokes have not reached the server yet.
+                call('OnFileSelected', stem, ext, f.size, f.type || '', toLocalInput(f.lastModified || Date.now()),
+                    inputValue(TITLE_INPUT_ID));
             });
         },
 
         unregister: function () { dotnet = null; },
 
-        // meta: { title, recordedAtLocal: "yyyy-MM-ddTHH:mm" }. Returns null on start, or an error string.
+        // meta: { title, recordedAtLocal: "yyyy-MM-ddTHH:mm", titleInputId, recordedAtInputId }.
+        // Returns null on start, or an error string.
         start: async function (inputId, meta) {
             if (current) return 'An upload is already in progress.';
             const input = document.getElementById(inputId);
@@ -185,9 +199,14 @@ window.firmUpload = (function () {
             const fb = document.getElementById('firm-upload-fallback');
             if (fb) { fb.hidden = true; fb.textContent = ''; }
 
-            const recorded = meta && meta.recordedAtLocal ? new Date(meta.recordedAtLocal) : new Date(file.lastModified || Date.now());
-            const recordedAt = isNaN(recorded.getTime()) ? new Date().toISOString() : recorded.toISOString();
-            const title = (meta && meta.title) || '';
+            // WI #9139-b: title and recorded-at come from the inputs themselves, not the component's bound fields,
+            // which can lag behind what is on screen (keystrokes relayed over the circuit, Android IME composition).
+            // Blank or missing input: the component's value; blank too: the server's default title.
+            const m = meta || {};
+            const title = inputValue(m.titleInputId) || (typeof m.title === 'string' ? m.title.trim() : '');
+            const parse = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d.getTime()) ? null : d; };
+            const recorded = parse(inputValue(m.recordedAtInputId)) || parse(m.recordedAtLocal) || parse(file.lastModified || Date.now());
+            const recordedAt = recorded ? recorded.toISOString() : new Date().toISOString();
 
             let res;
             try {
