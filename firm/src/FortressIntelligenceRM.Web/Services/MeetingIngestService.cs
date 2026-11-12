@@ -157,6 +157,117 @@ public class MeetingIngestService
         }
     }
 
+    /// <summary>
+    /// WI #9139 — sibling of <see cref="IngestRecordingAsync"/> for audio that is <b>already in S3</b> (the browser
+    /// chunked upload completes a multipart upload to a temporary key first). Same row insert (StartDatetime =
+    /// StartedAt = recorded-at, status Transcribing), same external_id dedupe, then a server-side copy of
+    /// <paramref name="sourceKey"/> to firm-audio/{meetingId}/{source}{ext}, AudioS3Key, and the Batch submit through
+    /// the same <see cref="MeetingService.SubmitTranscriptionJobAsync"/> path. The caller must only call this once
+    /// the object exists, so no half-created rows. The temporary object is deleted (best-effort) after the copy.
+    /// Throws <see cref="MeetingIngestStorageException"/> if the copy fails (row marked Failed; source object kept).
+    /// </summary>
+    public async Task<IngestResult> IngestStoredObjectAsync(IngestRequest request, string sourceKey, long length, string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrEmpty(request.ExternalId))
+        {
+            var existing = await _meetingService.GetMeetingByExternalIdAsync(request.CreatedBy, request.ExternalId);
+            if (existing != null)
+            {
+                _logger.LogInformation("FIRM: Ingest skipped, {Source} recording already imported as meeting {MeetingId}",
+                    request.Source, existing.Id);
+                return new IngestResult(existing.Id, Submitted: false, AlreadyExisted: true);
+            }
+        }
+
+        var recordedAt = request.RecordedAtUtc.Kind == DateTimeKind.Utc
+            ? request.RecordedAtUtc
+            : request.RecordedAtUtc.ToUniversalTime();
+        var now = DateTime.UtcNow;
+
+        // 1. Insert the meeting row (identical fields to IngestRecordingAsync).
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var meeting = new FirmMeeting
+        {
+            Title = request.Title,
+            Platform = request.Platform,
+            Source = request.Source,
+            ExternalId = string.IsNullOrEmpty(request.ExternalId) ? null : request.ExternalId,
+            MeetingUrl = null,
+            Status = MeetingStatus.Transcribing,
+            CreatedBy = request.CreatedBy,
+            CreatorEntraOid = request.CreatorEntraOid,
+            StartDatetime = recordedAt,
+            StartedAt = recordedAt,
+            EndedAt = request.DurationSeconds.HasValue ? recordedAt.AddSeconds(request.DurationSeconds.Value) : now,
+            DurationSeconds = request.DurationSeconds,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.Meetings.Add(meeting);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (CalendarAutoSyncService.IsDuplicateKeyException(ex)
+                                           && !string.IsNullOrEmpty(request.ExternalId))
+        {
+            var existing = await _meetingService.GetMeetingByExternalIdAsync(request.CreatedBy, request.ExternalId);
+            if (existing == null) throw;
+            _logger.LogInformation("FIRM: Ingest skipped, {Source} recording already imported as meeting {MeetingId} (duplicate key)",
+                request.Source, existing.Id);
+            return new IngestResult(existing.Id, Submitted: false, AlreadyExisted: true);
+        }
+
+        // 2. Move the audio next to the vpbot's recordings: firm-audio/{meetingId}/{source}{ext}.
+        var audioKey = $"firm-audio/{meeting.Id}/{SafeSegment(request.Source)}{NormalizeExtension(request.FileExtension)}";
+        try
+        {
+            await _s3Service.CopyObjectAsync(sourceKey, audioKey,
+                string.IsNullOrWhiteSpace(contentType) ? "audio/mp4" : contentType, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Ingest S3 copy failed for {Source} meeting {MeetingId} ({Bytes} bytes)",
+                request.Source, meeting.Id, length);
+            meeting.Status = MeetingStatus.Failed;
+            meeting.ErrorMessage = "Audio upload to storage failed";
+            meeting.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw new MeetingIngestStorageException(meeting.Id, ex);
+        }
+
+        // 3. Record the key, drop the temporary object, then submit the Batch transcription job.
+        meeting.AudioS3Key = audioKey;
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        try
+        {
+            await _s3Service.DeleteObjectAsync(sourceKey, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Not fatal: the S3 lifecycle rule on firm-uploads/ removes leftovers.
+            _logger.LogWarning("FIRM: Ingest could not delete the temporary upload object for {Source} meeting {MeetingId}: {Error}",
+                request.Source, meeting.Id, ex.GetType().Name);
+        }
+
+        try
+        {
+            var jobId = await _meetingService.SubmitTranscriptionJobAsync(meeting.Id);
+            _logger.LogInformation("FIRM: Ingest Batch job {JobId} submitted for {Source} meeting {MeetingId}",
+                jobId, request.Source, meeting.Id);
+            return new IngestResult(meeting.Id, Submitted: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Ingest failed to submit Batch job for {Source} meeting {MeetingId}",
+                request.Source, meeting.Id);
+            return new IngestResult(meeting.Id, Submitted: false);
+        }
+    }
+
     private static string NormalizeExtension(string? ext)
     {
         var e = (ext ?? "").Trim().ToLowerInvariant();

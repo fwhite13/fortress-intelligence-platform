@@ -83,6 +83,9 @@ builder.Services.AddSingleton(branding);
 // Application services
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<MeetingIngestService>(); // WI #9131 — shared recording ingest (mobile upload, Plaud)
+// WI #9139 — /upload chunked browser upload (state in S3 under firm-uploads/{userId}/, no in-memory state).
+// The request size limit is raised only on the part endpoint ([RequestSizeLimit] on RecordingUploadController).
+builder.Services.AddScoped<RecordingUploadService>();
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<AutoJoinSchedulerService>();
 builder.Services.AddAWSService<IAmazonScheduler>();

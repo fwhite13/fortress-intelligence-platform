@@ -144,4 +144,167 @@ public class S3Service
         _logger.LogInformation("FIRM: Uploaded stream to S3 (multipart-capable): {Key}", s3Key);
         return s3Key;
     }
+
+    // ── WI #9139: S3 multipart helpers for the browser chunked upload (/upload). ──────────────────────
+    // These deliberately log nothing: the temporary keys contain a sanitised file name, and the caller
+    // (RecordingUploadService) logs upload id, byte counts and status only.
+
+    /// <summary>Starts a multipart upload and returns S3's UploadId (server-side only; never sent to the browser).</summary>
+    public async Task<string> CreateMultipartUploadAsync(string s3Key, string contentType, CancellationToken cancellationToken = default)
+    {
+        var response = await _s3.InitiateMultipartUploadAsync(new InitiateMultipartUploadRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            ContentType = contentType
+        }, cancellationToken);
+        return response.UploadId;
+    }
+
+    /// <summary>Uploads one part (1-based). The stream must be seekable with a known length.</summary>
+    public async Task<string> UploadPartAsync(string s3Key, string s3UploadId, int partNumber, Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _s3.UploadPartAsync(new UploadPartRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            UploadId = s3UploadId,
+            PartNumber = partNumber,
+            PartSize = content.Length,
+            InputStream = content
+        }, cancellationToken);
+        return response.ETag;
+    }
+
+    /// <summary>Lists every uploaded part (follows pagination). Throws AmazonS3Exception NoSuchUpload when the
+    /// multipart upload no longer exists (completed or aborted).</summary>
+    public async Task<List<(int PartNumber, string ETag, long Size)>> ListPartsAsync(string s3Key, string s3UploadId,
+        CancellationToken cancellationToken = default)
+    {
+        var parts = new List<(int, string, long)>();
+        string? marker = null;
+        while (true)
+        {
+            var request = new ListPartsRequest { BucketName = Bucket, Key = s3Key, UploadId = s3UploadId, MaxParts = 1000 };
+            if (marker != null) request.PartNumberMarker = marker;
+            var response = await _s3.ListPartsAsync(request, cancellationToken);
+            foreach (var p in response.Parts ?? new List<PartDetail>())
+                parts.Add(((int)p.PartNumber!, p.ETag, (long)p.Size!));
+            if (response.IsTruncated != true) break;
+            marker = response.NextPartNumberMarker.ToString();
+        }
+        return parts;
+    }
+
+    /// <summary>Completes a multipart upload from the given parts.</summary>
+    public async Task CompleteMultipartUploadAsync(string s3Key, string s3UploadId,
+        IEnumerable<(int PartNumber, string ETag)> parts, CancellationToken cancellationToken = default)
+    {
+        var request = new CompleteMultipartUploadRequest { BucketName = Bucket, Key = s3Key, UploadId = s3UploadId };
+        request.AddPartETags(parts.OrderBy(p => p.PartNumber).Select(p => new PartETag(p.PartNumber, p.ETag)));
+        await _s3.CompleteMultipartUploadAsync(request, cancellationToken);
+    }
+
+    /// <summary>Aborts a multipart upload; a NoSuchUpload (already completed/aborted) is ignored.</summary>
+    public async Task AbortMultipartUploadAsync(string s3Key, string s3UploadId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _s3.AbortMultipartUploadAsync(new AbortMultipartUploadRequest
+            {
+                BucketName = Bucket,
+                Key = s3Key,
+                UploadId = s3UploadId
+            }, cancellationToken);
+        }
+        catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchUpload")
+        {
+        }
+    }
+
+    /// <summary>Server-side copy within the recordings bucket (single CopyObject; fine up to 5 GB).</summary>
+    public async Task CopyObjectAsync(string sourceKey, string destinationKey, string? contentType = null,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new CopyObjectRequest
+        {
+            SourceBucket = Bucket,
+            SourceKey = sourceKey,
+            DestinationBucket = Bucket,
+            DestinationKey = destinationKey
+        };
+        if (!string.IsNullOrEmpty(contentType))
+        {
+            request.ContentType = contentType;
+            request.MetadataDirective = S3MetadataDirective.REPLACE;
+        }
+        await _s3.CopyObjectAsync(request, cancellationToken);
+    }
+
+    /// <summary>Object size in bytes, or null when the object does not exist.</summary>
+    public async Task<long?> GetObjectSizeAsync(string s3Key, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var meta = await _s3.GetObjectMetadataAsync(Bucket, s3Key, cancellationToken);
+            return meta.ContentLength;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Deletes an object (S3 delete is idempotent).</summary>
+    public async Task DeleteObjectAsync(string s3Key, CancellationToken cancellationToken = default)
+    {
+        await _s3.DeleteObjectAsync(Bucket, s3Key, cancellationToken);
+    }
+
+    /// <summary>Reads a small JSON object with its ETag and last-modified time; null when it does not exist.</summary>
+    public async Task<(string Json, string ETag, DateTime LastModifiedUtc)?> GetSmallObjectAsync(string s3Key,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _s3.GetObjectAsync(Bucket, s3Key, cancellationToken);
+            using var reader = new StreamReader(response.ResponseStream);
+            var body = await reader.ReadToEndAsync(cancellationToken);
+            var lastModified = response.LastModified is DateTime lm ? lm.ToUniversalTime() : DateTime.UtcNow;
+            return (body, response.ETag, lastModified);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Writes a small JSON object. <paramref name="ifNoneMatch"/> = "*" creates it only if absent;
+    /// <paramref name="ifMatch"/> overwrites only that ETag. Returns false when the condition failed
+    /// (412 PreconditionFailed or 409 ConditionalRequestConflict), true when written.</summary>
+    public async Task<bool> PutSmallObjectAsync(string s3Key, string json, string? ifNoneMatch = null, string? ifMatch = null,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new PutObjectRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            ContentBody = json,
+            ContentType = "application/json"
+        };
+        if (ifNoneMatch != null) request.IfNoneMatch = ifNoneMatch;
+        if (ifMatch != null) request.IfMatch = ifMatch;
+        try
+        {
+            await _s3.PutObjectAsync(request, cancellationToken);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when ((ifNoneMatch != null || ifMatch != null)
+                                           && ex.StatusCode is System.Net.HttpStatusCode.PreconditionFailed
+                                                            or System.Net.HttpStatusCode.Conflict)
+        {
+            return false;
+        }
+    }
 }
