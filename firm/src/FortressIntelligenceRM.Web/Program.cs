@@ -192,6 +192,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
 builder.Services.AddHostedService<CalendarAutoSyncService>();
 builder.Services.AddHostedService<StuckMeetingRecoveryService>();
+// WI #9132: fails meetings stuck in Transcribing/Summarizing (all sources) after
+// Firm:StaleTranscribingHours (default 4, read by the service; values below 1 are clamped to 1).
+builder.Services.AddHostedService<StaleMeetingWatchdogService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
 // builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled
