@@ -3,7 +3,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject BrandingConfig Branding
-@inject RecordingUploadService Uploads
+@inject FortressIntelligenceRM.Web.Controllers.RecordingUploadService Uploads
 
 @* WI #9139 — upload a recording from any recorder (Voice Memos, a call-recorder export, a Plaud file export...).
    Mobile-first; "Add to Home Screen" opens this page (manifest start_url). The file is read and sent in 8 MB
