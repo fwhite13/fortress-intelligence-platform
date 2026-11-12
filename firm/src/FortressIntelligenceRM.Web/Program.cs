@@ -99,6 +99,7 @@ builder.Services.Configure<FortressIntelligenceRM.Web.Services.Plaud.PlaudOption
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudMcpClient>();
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService, FortressIntelligenceRM.Web.Services.Plaud.PlaudOAuthService>();
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService>(); // WI #9134 — Plaud import (Sync now)
+builder.Services.AddSingleton<FortressIntelligenceRM.Web.Services.Plaud.PlaudMockState>(); // WI #9138 — DEV-ONLY Plaud mock; routes 404 unless Firm:PlaudMock:Enabled
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddScoped<AdminAccessService>();
 builder.Services.AddScoped<SpeakerEmbeddingService>();

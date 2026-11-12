@@ -25,4 +25,8 @@
     <PackageReference Include="Microsoft.Bot.Builder" Version="4.22.9" />
     <PackageReference Include="Microsoft.Bot.Builder.Integration.AspNet.Core" Version="4.22.9" />
   </ItemGroup>
+  <!-- WI #9138: DEV-ONLY Plaud mock fixture audio + transcripts, served by PlaudMockController. -->
+  <ItemGroup>
+    <EmbeddedResource Include="PlaudMock/Fixtures/*.m4a;PlaudMock/Fixtures/*.transcript.tsv" LogicalName="PlaudMock.%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
