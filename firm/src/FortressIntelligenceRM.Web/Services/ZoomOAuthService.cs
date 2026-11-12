@@ -10,6 +10,8 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public class ZoomOAuthService : IZoomOAuthService
 {
+    private static readonly TimeSpan RefreshSkew = TimeSpan.FromMinutes(5);
+
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ZoomOAuthService> _logger;
@@ -67,7 +69,7 @@ public class ZoomOAuthService : IZoomOAuthService
         var tokenBody = await tokenRes.Content.ReadAsStringAsync();
         if (!tokenRes.IsSuccessStatusCode)
         {
-            _logger.LogError("FIRM: Zoom OAuth code exchange failed: {Status} {Body}", tokenRes.StatusCode, tokenBody);
+            _logger.LogError("FIRM: Zoom OAuth code exchange failed: {Status} {Error}", tokenRes.StatusCode, OAuthErrorCode(tokenBody));
             throw new InvalidOperationException("Zoom OAuth code exchange failed");
         }
 
@@ -134,24 +136,33 @@ public class ZoomOAuthService : IZoomOAuthService
     {
         try
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            var record = await db.ZoomOAuthTokens.FirstOrDefaultAsync(z => z.UserId == userId);
-            if (record == null)
+            FirmZoomOAuth? snapshot;
+            await using (var db = await _dbFactory.CreateDbContextAsync())
+                snapshot = await db.ZoomOAuthTokens.AsNoTracking().FirstOrDefaultAsync(z => z.UserId == userId);
+            if (snapshot == null)
                 return null;
 
-            if (record.ExpiresAt < DateTime.UtcNow.AddMinutes(5) && !await RefreshAccessTokenAsync(db, record))
-                return null;
+            string? accessToken = snapshot.AccessToken;
+            if (snapshot.ExpiresAt < DateTime.UtcNow + RefreshSkew)
+            {
+                accessToken = await RefreshLockedAsync(userId, accessToken, forceRefresh: false);
+                if (accessToken == null)
+                    return null;
+            }
 
-            var (ok, authError, token) = await FetchObfTokenAsync(record.AccessToken, meetingId);
+            var (ok, authError, token) = await FetchObfTokenAsync(accessToken, meetingId);
             if (ok)
                 return token;
             if (!authError)
                 return null;
 
-            if (!await RefreshAccessTokenAsync(db, record))
+            // 401/403: the token we used is bad. Refresh under the row lock unless another caller
+            // already replaced it, then retry once.
+            accessToken = await RefreshLockedAsync(userId, accessToken, forceRefresh: true);
+            if (accessToken == null)
                 return null;
 
-            var (ok2, _, token2) = await FetchObfTokenAsync(record.AccessToken, meetingId);
+            var (ok2, _, token2) = await FetchObfTokenAsync(accessToken, meetingId);
             return ok2 ? token2 : null;
         }
         catch (Exception ex)
@@ -186,36 +197,83 @@ public class ZoomOAuthService : IZoomOAuthService
         return await db.ZoomOAuthTokens.AsNoTracking().FirstOrDefaultAsync(z => z.UserId == userId);
     }
 
-    private async Task<bool> RefreshAccessTokenAsync(FirmDbContext db, FirmZoomOAuth record)
+    /// <summary>
+    /// Refreshes the user's Zoom tokens under a row lock (SELECT ... FOR UPDATE) so concurrent callers
+    /// do not both spend the refresh token. <paramref name="seenAccessToken"/> is the access token the
+    /// caller read before locking: if the stored one differs after the lock, another caller has already
+    /// refreshed and its token is returned without calling Zoom. (updated_at is not usable for this
+    /// check: the column has ON UPDATE CURRENT_TIMESTAMP.) Tokens stay stored as plaintext, as before.
+    /// Returns the current access token, or null if there is no row or the refresh failed.
+    /// </summary>
+    private async Task<string?> RefreshLockedAsync(Guid userId, string seenAccessToken, bool forceRefresh)
     {
-        var refreshed = await RefreshTokensAsync(record.RefreshToken);
-        if (refreshed == null)
+        await using var outer = await _dbFactory.CreateDbContextAsync();
+        // FIRM's context has EnableRetryOnFailure, so a user transaction must run inside the strategy.
+        var strategy = outer.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            _logger.LogWarning("FIRM: Zoom token refresh failed for user {UserId}", record.UserId);
-            return false;
-        }
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
 
-        record.AccessToken = refreshed.AccessToken;
-        if (refreshed.RefreshToken != null)
-            record.RefreshToken = refreshed.RefreshToken;
-        record.ExpiresAt = refreshed.ExpiresAt;
-        record.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
-        return true;
+            var rows = await db.ZoomOAuthTokens
+                .FromSqlRaw("SELECT * FROM firm_zoom_oauth WHERE user_id = {0} FOR UPDATE", userId.ToString())
+                .ToListAsync();
+            var row = rows.FirstOrDefault();
+            if (row == null)
+            {
+                await tx.CommitAsync();
+                return null;
+            }
+
+            // Re-check after acquiring the lock.
+            var refreshedByOther = row.AccessToken != seenAccessToken;
+            var stillFresh = !forceRefresh && row.ExpiresAt >= DateTime.UtcNow + RefreshSkew;
+            if (refreshedByOther || stillFresh)
+            {
+                await tx.CommitAsync();
+                return row.AccessToken;
+            }
+
+            var refreshed = await RefreshTokensAsync(row.RefreshToken);
+            if (refreshed == null)
+            {
+                await tx.RollbackAsync();
+                _logger.LogWarning("FIRM: Zoom token refresh failed for user {UserId}", userId);
+                return null;
+            }
+
+            row.AccessToken = refreshed.AccessToken;
+            // Keep the stored refresh token when Zoom does not return a new one.
+            if (!string.IsNullOrEmpty(refreshed.RefreshToken))
+                row.RefreshToken = refreshed.RefreshToken;
+            row.ExpiresAt = refreshed.ExpiresAt;
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return row.AccessToken;
+        });
     }
 
     public async Task<ZoomTokenRefreshResult?> RefreshTokensAsync(string refreshToken)
     {
         var http = _httpClientFactory.CreateClient();
-        var url = $"https://zoom.us/oauth/token?grant_type=refresh_token&refresh_token={Uri.EscapeDataString(refreshToken)}";
-        using var req = new HttpRequestMessage(HttpMethod.Post, url);
+        // The refresh token goes in the form body, never the URL: request URIs are logged by the
+        // IHttpClientFactory handlers and by any proxy in between.
+        using var req = new HttpRequestMessage(HttpMethod.Post, "https://zoom.us/oauth/token")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = refreshToken,
+            })
+        };
         req.Headers.Authorization = BasicAuthHeader();
 
         var res = await http.SendAsync(req);
         var body = await res.Content.ReadAsStringAsync();
         if (!res.IsSuccessStatusCode)
         {
-            _logger.LogWarning("FIRM: Zoom token refresh failed: {Status} {Body}", res.StatusCode, body);
+            _logger.LogWarning("FIRM: Zoom token refresh failed: {Status} {Error}", res.StatusCode, OAuthErrorCode(body));
             return null;
         }
 
@@ -245,6 +303,26 @@ public class ZoomOAuthService : IZoomOAuthService
         var authError = res.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
         _logger.LogInformation("FIRM: Zoom OBF token request returned {Status} for meeting {MeetingId}", res.StatusCode, meetingId);
         return (false, authError, null);
+    }
+
+    /// <summary>
+    /// The OAuth "error" (or Zoom "reason") field of an error response, for logging instead of the raw body.
+    /// </summary>
+    private static string OAuthErrorCode(string body)
+    {
+        try
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(body);
+            if (json.ValueKind == JsonValueKind.Object)
+            {
+                if (json.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String)
+                    return e.GetString() ?? "unknown";
+                if (json.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String)
+                    return r.GetString() ?? "unknown";
+            }
+        }
+        catch (JsonException) { }
+        return "unknown";
     }
 
     private AuthenticationHeaderValue BasicAuthHeader() =>
