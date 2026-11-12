@@ -95,6 +95,32 @@ public class PlaudMockController : Controller
             && !u.IsLoopback
             && !string.Equals(u.Host, "localhost", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>The real client's configured redirect URI: the only one this mock trusts without registration.</summary>
+    public const string PlaudRedirectUriKey = "Firm:Plaud:RedirectUri";
+
+    /// <summary>
+    /// WI #9139-b — the registered client, or, when <paramref name="clientId"/> is unknown but
+    /// <paramref name="redirectUri"/> is exactly Firm:Plaud:RedirectUri, that client_id registered implicitly
+    /// (public, that one redirect URI). FIRM caches its client_id in firm_oauth_clients; the mock keeps clients
+    /// in memory only, so every restart (or a client_id cached from the real Plaud server) would otherwise fail
+    /// Connect. Any other unknown client or redirect_uri returns null and is rejected by the caller as before.
+    /// </summary>
+    private PlaudMockState.MockClient? FindOrImplicitClient(string? clientId, string? redirectUri)
+    {
+        var client = _state.FindClient(clientId);
+        if (client != null)
+            return client;
+        var trusted = _config[PlaudRedirectUriKey];
+        if (string.IsNullOrEmpty(clientId) || clientId.Length > 256
+            || string.IsNullOrEmpty(trusted) || !IsValidRedirectUri(trusted)
+            || !string.Equals(redirectUri, trusted, StringComparison.Ordinal))
+            return null;
+        client = _state.RegisterImplicitClient(clientId, trusted, out var created);
+        if (created)
+            _logger.LogInformation("[PlaudMock] implicit client registered");
+        return client;
+    }
+
     // ── Discovery ────────────────────────────────────────────────────────
 
     [HttpGet(".well-known/oauth-authorization-server")]
@@ -183,7 +209,7 @@ public class PlaudMockController : Controller
         // (http://localhost:8080/dev/plaud-mock/mcp) or the public one; every value is accepted, never rejected.
 
         // An unknown client or unregistered redirect_uri must never be redirected to (RFC 6749 §4.1.2.1).
-        var client = _state.FindClient(clientId);
+        var client = FindOrImplicitClient(clientId, redirectUri);
         if (client == null || redirectUri == null || !client.RedirectUris.Contains(redirectUri))
             return ConsentHtml("Mock Plaud: unknown client or redirect_uri", "<p>The client_id or redirect_uri is not registered with this mock.</p>", 400);
         if (!RedirectUriAllowedForBrowser(redirectUri))
@@ -224,7 +250,7 @@ public class PlaudMockController : Controller
         [FromForm(Name = "state")] string? state,
         [FromForm(Name = "code_challenge")] string? codeChallenge)
     {
-        var client = _state.FindClient(clientId);
+        var client = FindOrImplicitClient(clientId, redirectUri);
         if (client == null || redirectUri == null || !client.RedirectUris.Contains(redirectUri))
             return ConsentHtml("Mock Plaud: unknown client or redirect_uri", "<p>The client_id or redirect_uri is not registered with this mock.</p>", 400);
         if (!RedirectUriAllowedForBrowser(redirectUri))
@@ -299,7 +325,7 @@ public class PlaudMockController : Controller
             clientId = basicId;
             secret = basicSecret;
         }
-        var client = _state.FindClient(clientId);
+        var client = FindOrImplicitClient(clientId, form["redirect_uri"].ToString());
         if (client == null
             || (client.ClientSecret != null && !string.Equals(client.ClientSecret, secret, StringComparison.Ordinal)))
         {

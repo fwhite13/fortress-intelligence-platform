@@ -86,6 +86,31 @@ public class PlaudMockState
         return client;
     }
 
+    /// <summary>
+    /// WI #9139-b — registers <paramref name="clientId"/> as a public client (no secret) with the single
+    /// <paramref name="redirectUri"/>, unless it is already registered, in which case the existing client is
+    /// returned unchanged and <paramref name="created"/> is false. The caller decides when this is allowed
+    /// (only for Firm:Plaud:RedirectUri): FIRM caches its client_id in firm_oauth_clients, this mock forgets
+    /// its clients on every restart.
+    /// </summary>
+    public MockClient RegisterImplicitClient(string clientId, string redirectUri, out bool created)
+    {
+        lock (_lock)
+        {
+            if (_clients.TryGetValue(clientId, out var existing))
+            {
+                created = false;
+                return existing;
+            }
+            Trim(_clients);
+            var client = new MockClient(clientId, null, new[] { redirectUri }, "", "none", DateTime.UtcNow);
+            _clients[clientId] = client;
+            Count("register_implicit");
+            created = true;
+            return client;
+        }
+    }
+
     public MockClient? FindClient(string? clientId)
     {
         if (string.IsNullOrEmpty(clientId)) return null;
