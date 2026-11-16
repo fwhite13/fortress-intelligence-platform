@@ -960,51 +960,126 @@ export class MeetingBot extends EventEmitter {
    * at once instead of lingering until Teams' own timeout. Clicks only a control labelled "Leave" (never
    * "End meeting" / "End for everyone", which an organizer could see); accepts a confirmation dialog's Leave option
    * only. Time-bounded (3 s click, ~1 s for the call to drop, 6 s overall) and never throws.
+   *
+   * WI #9476: prod meeting 208 showed `[data-tid="hangup-button"]` not visible at cleanup although the join check had
+   * found the control by role. Now: nudge the mouse over the middle of the page so an auto-hidden toolbar renders,
+   * then try the join check's proven locator (getByRole button /Leave/), then data-tid hangup-button, then
+   * button:has-text("Leave"); Ctrl+Shift+H (Teams' leave-call shortcut) is the last resort. Logs the method that
+   * worked, or counts-only diagnostics (matches / visible per selector, toolbar visible before/after the nudge;
+   * never label text or names) when no control was clicked.
    */
   private async clickTeamsLeave(page: Page): Promise<void> {
-    const isLeaveLabel = (label: string) => /\bleave\b/i.test(label) && !/\bend\b/i.test(label);
-    const attempt = async (): Promise<boolean> => {
-      const btn = page.locator('[data-tid="hangup-button"]').first();
-      if (!(await btn.isVisible().catch(() => false))) return false;
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute('aria-label') || el.getAttribute('title') || (el.textContent || '').trim(),
-        undefined, { timeout: 1000 }).catch(() => '');
-      if (!isLeaveLabel(label)) {
-        console.log(`[Bot] Teams hang-up control is not labelled Leave (labelled=${label.length > 0}) - not clicking`);
-        return false;
+    // Never click anything labelled End ("End meeting", "End for everyone"), nor the split button's options chevron
+    const isLeaveLabel = (label: string) =>
+      /\bleave\b/i.test(label) && !/\bend\b/i.test(label) && !/\b(options?|more)\b/i.test(label);
+    const readLabel = (el: HTMLElement): string => {
+      const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => (document.getElementById(id)?.textContent || '').trim()).filter(Boolean).join(' ');
+      return (el.getAttribute('aria-label') || labelledBy || el.getAttribute('title') || (el.textContent || '')).trim();
+    };
+    const candidates: Array<{ method: 'role' | 'data-tid' | 'has-text'; locator: () => ReturnType<Page['locator']> }> = [
+      { method: 'role', locator: () => page.getByRole('button', { name: /Leave/i }) },
+      { method: 'data-tid', locator: () => page.locator('[data-tid="hangup-button"]') },
+      { method: 'has-text', locator: () => page.locator('button:has-text("Leave")') },
+    ];
+    const MAX_PER_SELECTOR = 10;
+    // Counts only - no label text, no names. Filled in as the attempt runs so a timeout still reports what it saw.
+    const diag = {
+      toolbarBeforeMove: false,
+      toolbarAfterMove: false,
+      counts: {} as Record<string, { matches: number; visible: number; notLeaveLabel: number }>,
+      timedOut: false,
+    };
+    const logDiagnostics = () => {
+      const parts = candidates.map(c => {
+        const n = diag.counts[c.method];
+        return n ? `${c.method} matches=${n.matches} visible=${n.visible} notLeaveLabel=${n.notLeaveLabel}`
+                 : `${c.method} not checked`;
+      });
+      console.log(`[Bot] Teams Leave diagnostics: ${parts.join('; ')}; toolbar visible before move=${diag.toolbarBeforeMove}, after move=${diag.toolbarAfterMove}${diag.timedOut ? '; timed out' : ''}`);
+    };
+    const anyLeaveControlVisible = async (): Promise<boolean> => {
+      for (const c of candidates) {
+        if (await c.locator().first().isVisible().catch(() => false)) return true;
       }
-      await btn.click({ timeout: 3000 });
-      // Some Teams builds confirm the leave; accept the Leave option only, never "End meeting"
+      return false;
+    };
+    // Some Teams builds confirm the leave; accept the Leave option only, never "End meeting"
+    const acceptLeaveConfirmation = async (): Promise<boolean> => {
       const dialogButtons = page.locator('[role="dialog"] button, [role="alertdialog"] button');
       const confirmDeadline = Date.now() + 1000;
-      let confirmed = false;
-      while (!confirmed && Date.now() < confirmDeadline) {
+      while (Date.now() < confirmDeadline) {
         const count = await dialogButtons.count().catch(() => 0);
-        for (let i = 0; i < count && !confirmed; i++) {
+        for (let i = 0; i < count; i++) {
           const b = dialogButtons.nth(i);
           const text = await b.evaluate((el: HTMLElement) =>
             el.getAttribute('aria-label') || (el.textContent || '').trim(), undefined, { timeout: 500 }).catch(() => '');
           if (/^\s*leave\b/i.test(text) && !/\bend\b/i.test(text)) {
             await b.click({ timeout: 1000 }).catch(() => {});
-            confirmed = true;
+            console.log('[Bot] Accepted the Teams Leave confirmation');
+            return true;
           }
         }
-        if (!confirmed) await page.waitForTimeout(250).catch(() => {});
+        await page.waitForTimeout(250).catch(() => {});
       }
-      if (confirmed) console.log('[Bot] Accepted the Teams Leave confirmation');
-      // Give Teams about a second to drop the call before the page closes
-      await btn.waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
-      return true;
+      return false;
+    };
+    const attempt = async (): Promise<string | null> => {
+      diag.toolbarBeforeMove = await anyLeaveControlVisible();
+      // Reveal an auto-hidden in-call toolbar: a couple of small mouse moves over the middle of the page
+      const vp = page.viewportSize() ?? { width: 1280, height: 720 };
+      const cx = Math.round(vp.width / 2), cy = Math.round(vp.height / 2);
+      await page.mouse.move(cx, cy).catch(() => {});
+      await page.waitForTimeout(150).catch(() => {});
+      await page.mouse.move(cx + 12, cy + 8, { steps: 3 }).catch(() => {});
+      await page.waitForTimeout(300).catch(() => {});
+      diag.toolbarAfterMove = await anyLeaveControlVisible();
+
+      for (const c of candidates) {
+        const loc = c.locator();
+        const matches = await loc.count().catch(() => 0);
+        const n = { matches, visible: 0, notLeaveLabel: 0 };
+        diag.counts[c.method] = n;
+        for (let i = 0; i < Math.min(matches, MAX_PER_SELECTOR); i++) {
+          const btn = loc.nth(i);
+          if (!(await btn.isVisible().catch(() => false))) continue;
+          n.visible++;
+          const label = await btn.evaluate(readLabel, undefined, { timeout: 1000 }).catch(() => '');
+          if (!isLeaveLabel(label)) { n.notLeaveLabel++; continue; }
+          await btn.click({ timeout: 3000 });
+          await acceptLeaveConfirmation();
+          // Give Teams about a second to drop the call before the page closes
+          await btn.waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+          return c.method;
+        }
+      }
+
+      // Last resort: Teams' leave-call keyboard shortcut
+      logDiagnostics();
+      const inCall = page.locator('[data-tid="calling-screen"], [data-tid="hangup-button"]').first();
+      const wasInCall = await inCall.isVisible().catch(() => false);
+      await page.keyboard.press('Control+Shift+H');
+      const confirmed = await acceptLeaveConfirmation();
+      const dropped = wasInCall
+        && await inCall.waitFor({ state: 'hidden', timeout: 1000 }).then(() => true, () => false);
+      if (confirmed || dropped) return 'shortcut';
+      console.log(`[Bot] Sent the Teams leave shortcut; leave not confirmed (in-call UI visible before=${wasInCall})`);
+      return null;
     };
     try {
-      const clicked = await Promise.race([
-        attempt(),
-        new Promise<boolean>(r => setTimeout(() => r(false), 6000)),
+      let attemptDone = false;
+      const method = await Promise.race([
+        attempt().finally(() => { attemptDone = true; }),
+        new Promise<null>(r => setTimeout(() => {
+          if (!attemptDone) { diag.timedOut = true; logDiagnostics(); }
+          r(null);
+        }, 6000)),
       ]);
-      console.log(clicked
-        ? '[Bot] Clicked Teams Leave before closing'
+      console.log(method
+        ? `[Bot] Clicked Teams Leave before closing (method=${method})`
         : '[Bot] Teams Leave button not available - closing anyway');
     } catch (err: any) {
+      logDiagnostics();
       console.log(`[Bot] Teams Leave button not available - closing anyway (${err?.name ?? 'error'})`);
     }
   }
