@@ -116,6 +116,28 @@ const CAPTION_BINDING_NAME = '__firmOnCaptionUtterance';
 /** A caption element unchanged for this long is treated as a finalized utterance */
 const CAPTION_SETTLE_MS = 300;
 
+/**
+ * WI #9463: openings of the messages the bot itself posts to the meeting chat: the join notice
+ * (postAdmissionChatNotification) and the leave acknowledgement (startChatCommandWatcher). Keep in step with them.
+ */
+function ownBotChatPrefixes(botName: string): string[] {
+  return [
+    `${botName} has joined to record this meeting`,
+    `${botName} is leaving this meeting`,
+    'This session is being recorded',
+  ];
+}
+
+/**
+ * Second self-filter for chat commands: true when the message starts with the bot's own join-notice or
+ * acknowledgement wording, so the bot never obeys its own messages even when the DOM does not expose the author.
+ */
+function isOwnBotChatMessage(text: string, botName: string): boolean {
+  const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const t = norm(text);
+  return !!t && ownBotChatPrefixes(botName).some(p => t.startsWith(norm(p)));
+}
+
 /** One finalized caption utterance; times are absolute epoch ms from the page clock */
 interface CaptionUtterance {
   name: string;
@@ -1489,9 +1511,14 @@ export class TeamsHandler {
     const botName = process.env.BOT_NAME || 'Fortress Notetaker';
     const INTERVAL_MS = 4000;
     const debug = process.env.CHAT_WATCH_DEBUG === '1';
+    // WI #9463: after this many consecutive polls that find no messages, dump the side-panel structure once
+    const EMPTY_POLLS_BEFORE_DUMP = 5;
     let polls = 0;
     let loggedStructure = false;
     let lastNoPaneLog = 0;
+    let lastCount: number | null = null;
+    let emptyStreak = 0;
+    let dumpedStructure = false;
 
     console.log(`[Teams][ChatCmd] Watching meeting chat for "leave" commands addressed to "${botName}" (every ${INTERVAL_MS / 1000}s)`);
     this._chatWatchInterval = setInterval(async () => {
@@ -1507,13 +1534,31 @@ export class TeamsHandler {
           return;
         }
         const read = await TeamsHandler.readChatMessages(page);
-        if (!loggedStructure || (debug && polls % 5 === 0)) {
+        const count = read.messages.length;
+        // WI #9463 diagnostics: counts and DOM labels only — never message text or author names
+        if (!loggedStructure) {
           loggedStructure = true;
-          console.log(`[Teams][ChatCmd] Read ${read.messages.length} chat message(s) via ${read.source}; structure: ${read.structure}`);
+          console.log(`[Teams][ChatCmd] First chat read: ${count} message(s); container=${read.container}; ` +
+            `selector=${read.selector ?? 'none'}; source=${read.source}; structure: ${read.structure}`);
+        } else if (debug && polls % 5 === 0) {
+          console.log(`[Teams][ChatCmd] Read ${count} chat message(s) via ${read.source}; structure: ${read.structure}`);
+        }
+        if (lastCount !== null && count !== lastCount) {
+          console.log(`[Teams][ChatCmd] Chat message count changed ${lastCount} -> ${count} ` +
+            `(source=${read.source}; selector=${read.selector ?? 'none'}; container=${read.container})`);
+        }
+        lastCount = count;
+        emptyStreak = count === 0 ? emptyStreak + 1 : 0;
+        if (emptyStreak >= EMPTY_POLLS_BEFORE_DUMP && !dumpedStructure) {
+          dumpedStructure = true;
+          const dump = await TeamsHandler.readChatMessages(page, true);
+          console.log(`[Teams][ChatCmd] No chat messages found in ${EMPTY_POLLS_BEFORE_DUMP} consecutive polls — ` +
+            `one-time side-panel structure dump (labels and counts only): ${dump.dump}`);
         }
         for (const m of read.messages) {
           if (!isLeaveCommand(m.text, botName)) continue;
           if (m.author && m.author.toLowerCase().includes(botName.toLowerCase())) continue; // never obey ourselves
+          if (isOwnBotChatMessage(m.text, botName)) continue; // WI #9463: second self-filter, by our own wording
           this._chatCommandFired = true;
           const who = m.author || null;
           console.log(`[Teams][ChatCmd] Leave command received${who ? ` from ${who}` : ''} — acknowledging and leaving`);
@@ -1544,6 +1589,10 @@ export class TeamsHandler {
     '[id^="new-message-"][contenteditable="true"]',
   ].join(', ');
 
+  /** Times the chat watcher had to re-open the chat pane (another side panel took the slot); diagnostics only */
+  private static _chatPaneReopens = 0;
+  private static _lastComposeMissLog = 0;
+
   /** True if the chat pane is open; opens it via the toolbar toggle when another side panel has taken the slot. */
   private static async ensureChatPaneOpen(page: Page): Promise<boolean> {
     if (await page.locator(TeamsHandler.COMPOSE_SELECTOR).first().isVisible().catch(() => false)) return true;
@@ -1558,10 +1607,18 @@ export class TeamsHandler {
         const alreadyOpen = state.pressed === 'true' || state.outcome?.toLowerCase() === 'hide';
         if (!alreadyOpen) {
           await btn.evaluate((el: HTMLElement) => el.click(), undefined, { timeout: 3000 });
-          console.log(`[Teams][ChatCmd] Re-opened chat pane via ${selector}`);
+          TeamsHandler._chatPaneReopens++;
+          // WI #9463: the count shows whether chat and the People panel keep fighting for the one side-panel slot
+          console.log(`[Teams][ChatCmd] Re-opened chat pane via ${selector} (re-open #${TeamsHandler._chatPaneReopens})`);
         }
-        return await page.locator(TeamsHandler.COMPOSE_SELECTOR).first()
+        const visible = await page.locator(TeamsHandler.COMPOSE_SELECTOR).first()
           .waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (!visible && Date.now() - TeamsHandler._lastComposeMissLog > 60000) {
+          TeamsHandler._lastComposeMissLog = Date.now();
+          console.log(`[Teams][ChatCmd] Chat toggle ${selector} found (aria-pressed=${state.pressed ?? 'n/a'}, ` +
+            `outcome=${state.outcome ?? 'n/a'}) but the compose box is not visible`);
+        }
+        return visible;
       } catch {
         continue;
       }
@@ -1570,14 +1627,29 @@ export class TeamsHandler {
   }
 
   /**
-   * Read the visible chat messages. Tries message elements first (with author when the DOM exposes it) and falls
-   * back to the lines of the pane that holds the compose box. Returns a structure summary (tag/data-tid counts,
-   * never message text) for diagnosing selector drift; set CHAT_WATCH_DEBUG=1 to also log message text.
+   * Read the visible chat messages (WI #9463). All Teams chat DOM knowledge lives in the constants at the top of the
+   * page function, so the next Teams change is a one-line edit there.
+   *
+   * Container resolution: starting at the compose box, walk up the ancestors (skipping the compose footer, which in
+   * current Teams is `chat-pane-compose-message-footer` and holds only toolbar buttons) until one contains message
+   * elements outside the footer. If no message selector matches anywhere, look for a message-list container in the
+   * side-panel region (the element that holds both the compose box and the list) and read its lines ('pane-lines'),
+   * but only when that list really holds items. Otherwise return source 'none' with zero messages, so the log says
+   * the list was not found instead of reporting the footer's button labels as messages.
+   *
+   * `structure`, `container` and `dump` carry tags, data-tids, roles, safe aria-labels and counts only — never
+   * message text or person names. `dump` is filled only when `withDump` is true (one-time diagnostics).
    */
-  private static async readChatMessages(page: Page): Promise<{
-    messages: { author: string | null; text: string }[]; source: string; structure: string;
+  private static async readChatMessages(page: Page, withDump = false): Promise<{
+    messages: { author: string | null; text: string }[];
+    source: string;
+    structure: string;
+    container: string;
+    selector: string | null;
+    dump: string;
   }> {
-    return await page.evaluate((composeSel) => {
+    return await page.evaluate(({ composeSel, withDump }) => {
+      /** One message element each (kept from the original watcher; first selector that matches wins) */
       const MESSAGE_SELECTORS = [
         '[data-tid="chat-pane-message"]',
         '[data-tid="chat-message"]',
@@ -1585,39 +1657,177 @@ export class TeamsHandler {
         '[id^="message-body-"]',
         '[data-tid*="message-content"]',
       ];
+      /** Candidate message-list containers in current and recent Teams web clients */
+      const MESSAGE_LIST_CONTAINER_CANDIDATES = [
+        '[data-tid="message-pane-list-viewport"]',
+        '[data-tid="message-pane-list-runway"]',
+        '[data-tid*="message-pane"]',
+        '[data-tid="chat-pane-list"]',
+        '[id="chat-pane-list"]',
+        '[data-tid*="chat-pane-message"]',
+        '[data-tid*="chat-message-list"]',
+        '[role="log"]',
+        '[role="list"]',
+      ];
+      /** Items inside a list container that show it really holds messages */
+      const LIST_ITEM_SELECTOR = '[data-tid="chat-pane-item"], [data-tid*="chat-pane-message"], [role="listitem"], ' +
+        '[role="article"], [role="row"], [data-tid*="message"]';
+      /** The message text inside a message element (so author and timestamp are not part of the text) */
+      const MESSAGE_BODY_SELECTORS = [
+        '[data-tid="message-body-content"]',
+        '[data-tid="message-body"]',
+        '[id^="message-body-"]',
+        '[id^="content-"]',
+        '[data-tid*="message-content"]',
+      ];
       const AUTHOR_SELECTORS = ['[data-tid="message-author-name"]', '[id^="author-"]', '[data-tid*="author"]'];
-      const compose = document.querySelector(composeSel);
-      const pane = compose?.closest('[data-tid*="pane"], [role="complementary"], aside, [id*="pane"], section') || null;
-      const root: ParentNode = pane || document;
-      const dataTids = new Map<string, number>();
-      root.querySelectorAll('[data-tid]').forEach((el) => {
-        const t = el.getAttribute('data-tid') || '';
-        if (/chat|message|author|pane/i.test(t)) dataTids.set(t, (dataTids.get(t) || 0) + 1);
-      });
-      const structure = `pane=${pane ? (pane.getAttribute('data-tid') || pane.tagName.toLowerCase()) : 'none'}; ` +
-        [...dataTids.entries()].slice(0, 14).map(([k, v]) => `${k}x${v}`).join(',');
+      /** Never part of the message text */
+      const NON_TEXT_SELECTOR = `${AUTHOR_SELECTORS.join(', ')}, time, [data-tid*="timestamp"], [data-tid*="time-stamp"]`;
+      /** The compose footer/toolbar is never the message container */
+      const FOOTER_SELECTOR = '[data-tid*="compose" i], [data-tid*="footer" i], [id*="compose" i], [id*="footer" i]';
+      const SIDE_PANEL_SELECTOR = '[role="complementary"], aside, [data-tid*="side-panel" i], [data-tid*="sidepanel" i], ' +
+        '[data-tid*="right-pane" i], [id*="side-panel" i]';
+      const MAX_ANCESTOR_WALK = 15;
 
-      for (const sel of MESSAGE_SELECTORS) {
-        const els = [...root.querySelectorAll(sel)];
-        if (els.length === 0) continue;
-        const messages = els.map((el) => {
-          let author: string | null = null;
-          let node: Element | null = el;
-          for (let depth = 0; depth < 6 && node && !author; depth++, node = node.parentElement) {
-            for (const a of AUTHOR_SELECTORS) {
-              const hit = node.querySelector(a);
-              const t = (hit?.textContent || '').trim();
-              if (t) { author = t; break; }
-            }
+      const compose = document.querySelector(composeSel);
+      const isFooter = (el: Element) => el.matches(FOOTER_SELECTOR);
+      const inFooter = (el: Element) => !!el.closest(FOOTER_SELECTOR);
+      /** An element that can hold messages: not in the compose footer and not wrapping the compose box itself */
+      const usable = (el: Element) => !inFooter(el) && !(compose && el.contains(compose));
+      // data-tids can carry person names (Teams uses the display name as data-tid on tiles and roster rows)
+      const safeTid = (el: Element) => {
+        const t = el.getAttribute('data-tid') || '';
+        return !t ? '' : /\s|@/.test(t) ? '(redacted)' : t.slice(0, 60);
+      };
+      const describe = (el: Element | null) => {
+        if (!el) return 'none';
+        const tid = safeTid(el);
+        const role = el.getAttribute('role');
+        return `${el.tagName.toLowerCase()}${tid ? `[data-tid=${tid}]` : ''}${role ? `[role=${role}]` : ''}`;
+      };
+      const ancestors: Element[] = [];
+      for (let n = compose?.parentElement || null, i = 0; n && i < MAX_ANCESTOR_WALK; n = n.parentElement, i++) ancestors.push(n);
+
+      // The side-panel region: the nearest non-footer ancestor of the compose box that also holds a list or a message
+      const ALL_LIST_SEL = [...MESSAGE_SELECTORS, ...MESSAGE_LIST_CONTAINER_CANDIDATES].join(', ');
+      // Fallback when nothing is found: a side-panel-like ancestor, else a few levels above the footer (below <body>)
+      const nonFooter = ancestors.filter((a) => !isFooter(a) && a !== document.body && a !== document.documentElement);
+      const region: Element | null =
+        ancestors.find((a) => !isFooter(a) && [...a.querySelectorAll(ALL_LIST_SEL)].some(usable))
+        || nonFooter.find((a) => a.matches(SIDE_PANEL_SELECTOR))
+        || nonFooter[Math.min(3, nonFooter.length - 1)]
+        || null;
+
+      const tidCounts = new Map<string, number>();
+      (region || document).querySelectorAll('[data-tid]').forEach((el) => {
+        const t = safeTid(el);
+        if (/chat|message|author|pane|list/i.test(t)) tidCounts.set(t, (tidCounts.get(t) || 0) + 1);
+      });
+      const structure = `region=${describe(region)}; ` +
+        [...tidCounts.entries()].slice(0, 14).map(([k, v]) => `${k}x${v}`).join(',');
+
+      const buildDump = () => {
+        if (!withDump) return '';
+        const root = region || document.body;
+        // Labels only when they look like UI labels, never like a person name or a message
+        const safeLabel = (el: Element) => {
+          const raw = (el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+          if (!raw) return '';
+          // Inside the message list (anything outside the compose toolbar) labels can carry message text or names
+          if (!inFooter(el) && el.closest(`${ALL_LIST_SEL}, [data-tid*="chat-pane-item"], [data-tid*="message" i]`)) return '';
+          if (raw.split(' ').length > 5) return '';
+          if (el.closest(MESSAGE_SELECTORS.join(', ')) || el.matches(`${AUTHOR_SELECTORS.join(', ')}, [role="img"], [role="listitem"], [role="article"], [role="row"], [role="treeitem"], [role="option"]`)) return '';
+          if (/avatar|author|persona|name|profile/i.test(el.getAttribute('data-tid') || '')) return '';
+          if (raw.length > 60 || /[,@]|[.!?]\s|\d{1,2}:\d{2}/.test(raw)) return '';
+          // "Fred White", "Fred", "J. Doe": capitalised words with no lower-case function words read as names
+          if (/^[A-Z][\p{L}'’.-]*(\s+[A-Z][\p{L}'’.-]*){0,3}$/u.test(raw) && !/^(Chat|Send|More|People|Close|Format|Attach|Emoji|Reply|Message|Messages|Options|Expand|Discard|Loop|Copilot|Meeting chat)$/i.test(raw)) return '(name-like)';
+          return raw.slice(0, 40);
+        };
+        const counts = new Map<string, number>();
+        const walk = (el: Element, depth: number) => {
+          if (depth > 6 || counts.size >= 200) return;
+          const tid = safeTid(el);
+          const role = el.getAttribute('role') || '';
+          const label = safeLabel(el);
+          const key = `d${depth}:${el.tagName.toLowerCase()}${tid ? `[tid=${tid}]` : ''}${role ? `[role=${role}]` : ''}${label ? `[aria=${label}]` : ''}`;
+          counts.set(key, (counts.get(key) || 0) + 1);
+          for (const c of el.children) walk(c, depth + 1);
+        };
+        walk(root, 0);
+        const chain = [compose, ...ancestors].filter(Boolean).slice(0, 12).map((a) => describe(a as Element)).join(' < ');
+        // Where (if anywhere) each known selector matches in the whole document, and how many of those are in the footer
+        const selectorCounts = [...MESSAGE_SELECTORS, ...MESSAGE_LIST_CONTAINER_CANDIDATES].map((s) => {
+          const all = [...document.querySelectorAll(s)];
+          return `${s}x${all.length}${all.length ? `(footer:${all.filter(inFooter).length})` : ''}`;
+        }).join(',');
+        const out = `region=${describe(region)}; compose-chain=${chain}; document-selectors=${selectorCounts}; elements=` +
+          [...counts.entries()].map(([k, v]) => `${k}x${v}`).join(',');
+        return out.length > 8000 ? `${out.slice(0, 8000)}...(truncated)` : out;
+      };
+
+      const textOf = (el: Element): string => {
+        const body = el.matches(MESSAGE_BODY_SELECTORS.join(', ')) ? el
+          : el.querySelector(MESSAGE_BODY_SELECTORS.join(', '));
+        if (body) return ((body as HTMLElement).innerText || body.textContent || '').trim();
+        // No body element: the message's text nodes minus author and timestamp
+        const parts: string[] = [];
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (n.parentElement?.closest(NON_TEXT_SELECTOR) && el.contains(n.parentElement.closest(NON_TEXT_SELECTOR))) continue;
+          const t = (n.textContent || '').trim();
+          if (t) parts.push(t);
+        }
+        return parts.join(' ').trim();
+      };
+      const authorOf = (el: Element, sel: string): string | null => {
+        let node: Element | null = el;
+        for (let depth = 0; depth < 6 && node; depth++, node = node.parentElement) {
+          // Stop at the message's own item: an ancestor holding several messages would yield a neighbour's author
+          if (depth > 0 && node.querySelectorAll(sel).length > 1) break;
+          for (const a of AUTHOR_SELECTORS) {
+            const t = (node.querySelector(a)?.textContent || '').trim();
+            if (t) return t;
           }
-          return { author, text: ((el as HTMLElement).innerText || el.textContent || '').trim() };
-        }).filter((m) => m.text);
-        return { messages, source: sel, structure };
+        }
+        return null;
+      };
+
+      // Strategy 1: walk up from the compose box; the first non-footer ancestor holding message elements wins
+      const scopes: ParentNode[] = [...ancestors.filter((a) => !isFooter(a)), document];
+      for (const scope of scopes) {
+        for (const sel of MESSAGE_SELECTORS) {
+          const found = [...scope.querySelectorAll(sel)].filter(usable);
+          // Nested matches (e.g. a content wrapper inside a content wrapper) count once: keep the outermost
+          const els = found.filter((el) => !found.some((o) => o !== el && o.contains(el)));
+          if (els.length === 0) continue;
+          // Report the nearest list container that holds every matched message (not a message element itself)
+          let list: Element | null = els[0].parentElement;
+          while (list && !(list.matches(MESSAGE_LIST_CONTAINER_CANDIDATES.join(', ')) && els.every((e) => list!.contains(e)))) {
+            list = list.parentElement;
+          }
+          const container = list && usable(list) ? list : (scope instanceof Element ? scope : null);
+          const messages = els.map((el) => ({ author: authorOf(el, sel), text: textOf(el) })).filter((m) => m.text);
+          return { messages, source: sel, structure, container: describe(container), selector: sel, dump: buildDump() };
+        }
       }
-      // Fallback: the lines of the pane itself (no author)
-      const lines = ((pane as HTMLElement | null)?.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
-      return { messages: lines.slice(-60).map((text) => ({ author: null, text })), source: 'pane-lines', structure };
-    }, TeamsHandler.COMPOSE_SELECTOR);
+
+      // Strategy 2: no message element matched: a list container in the side-panel region, read as lines (no author),
+      // only when it really holds items
+      const listScope: ParentNode = region || document;
+      for (const sel of MESSAGE_LIST_CONTAINER_CANDIDATES) {
+        const list = [...listScope.querySelectorAll(sel)].find((el) => usable(el) && el.querySelector(LIST_ITEM_SELECTOR));
+        if (!list) continue;
+        const lines = ((list as HTMLElement).innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+        if (lines.length === 0) continue;
+        return {
+          messages: lines.slice(-60).map((text) => ({ author: null, text })),
+          source: 'pane-lines', structure, container: describe(list), selector: sel, dump: buildDump(),
+        };
+      }
+
+      // Not found: say so rather than reading the compose footer's button labels as messages
+      return { messages: [], source: 'none', structure, container: 'none', selector: null, dump: buildDump() };
+    }, { composeSel: TeamsHandler.COMPOSE_SELECTOR, withDump });
   }
 
   /** Post a short message to the meeting chat (chat pane must be openable). */
