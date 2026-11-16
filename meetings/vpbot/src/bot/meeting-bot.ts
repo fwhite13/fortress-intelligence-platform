@@ -357,7 +357,7 @@ export class MeetingBot extends EventEmitter {
         // Fire-and-forget so captions and roster/active speaker polling start on
         // schedule instead of waiting up to ~40s for chat (WI #8211)
         const teamsHandler = this._teamsHandler;
-        TeamsHandler.postAdmissionChatNotification(this.page, () => teamsHandler.markChatNotificationDone())
+        TeamsHandler.postAdmissionChatNotification(this.page)
           .catch(err => console.warn('[Teams] Chat notification error (non-fatal):', err?.message ?? err))
           .finally(() => {
             // Start listening for "Notetaker, leave" once the join notice has had its turn at the chat pane.
@@ -956,10 +956,68 @@ export class MeetingBot extends EventEmitter {
   }
 
   /**
+   * WI #9469: leave a Teams call through Teams' own hang-up control so the bot drops out of the participant list
+   * at once instead of lingering until Teams' own timeout. Clicks only a control labelled "Leave" (never
+   * "End meeting" / "End for everyone", which an organizer could see); accepts a confirmation dialog's Leave option
+   * only. Time-bounded (3 s click, ~1 s for the call to drop, 6 s overall) and never throws.
+   */
+  private async clickTeamsLeave(page: Page): Promise<void> {
+    const isLeaveLabel = (label: string) => /\bleave\b/i.test(label) && !/\bend\b/i.test(label);
+    const attempt = async (): Promise<boolean> => {
+      const btn = page.locator('[data-tid="hangup-button"]').first();
+      if (!(await btn.isVisible().catch(() => false))) return false;
+      const label = await btn.evaluate((el: HTMLElement) =>
+        el.getAttribute('aria-label') || el.getAttribute('title') || (el.textContent || '').trim(),
+        undefined, { timeout: 1000 }).catch(() => '');
+      if (!isLeaveLabel(label)) {
+        console.log(`[Bot] Teams hang-up control is not labelled Leave (labelled=${label.length > 0}) - not clicking`);
+        return false;
+      }
+      await btn.click({ timeout: 3000 });
+      // Some Teams builds confirm the leave; accept the Leave option only, never "End meeting"
+      const dialogButtons = page.locator('[role="dialog"] button, [role="alertdialog"] button');
+      const confirmDeadline = Date.now() + 1000;
+      let confirmed = false;
+      while (!confirmed && Date.now() < confirmDeadline) {
+        const count = await dialogButtons.count().catch(() => 0);
+        for (let i = 0; i < count && !confirmed; i++) {
+          const b = dialogButtons.nth(i);
+          const text = await b.evaluate((el: HTMLElement) =>
+            el.getAttribute('aria-label') || (el.textContent || '').trim(), undefined, { timeout: 500 }).catch(() => '');
+          if (/^\s*leave\b/i.test(text) && !/\bend\b/i.test(text)) {
+            await b.click({ timeout: 1000 }).catch(() => {});
+            confirmed = true;
+          }
+        }
+        if (!confirmed) await page.waitForTimeout(250).catch(() => {});
+      }
+      if (confirmed) console.log('[Bot] Accepted the Teams Leave confirmation');
+      // Give Teams about a second to drop the call before the page closes
+      await btn.waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {});
+      return true;
+    };
+    try {
+      const clicked = await Promise.race([
+        attempt(),
+        new Promise<boolean>(r => setTimeout(() => r(false), 6000)),
+      ]);
+      console.log(clicked
+        ? '[Bot] Clicked Teams Leave before closing'
+        : '[Bot] Teams Leave button not available - closing anyway');
+    } catch (err: any) {
+      console.log(`[Bot] Teams Leave button not available - closing anyway (${err?.name ?? 'error'})`);
+    }
+  }
+
+  /**
    * Force leave the meeting and clean up
    */
   async cleanup(): Promise<void> {
     try {
+      // WI #9469: Teams only — hang up through Teams' Leave control first (bounded, non-fatal); Zoom/Meet unchanged
+      if (this.page && this.meeting.platform === 'teams' && !this.page.isClosed()) {
+        await this.clickTeamsLeave(this.page).catch(() => {});
+      }
       if (this.page) {
         await this.page.close().catch(() => {});
       }

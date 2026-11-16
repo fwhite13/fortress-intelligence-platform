@@ -150,10 +150,7 @@ interface CaptionUtterance {
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
-  private rosterPanelOpenAttempted = false;
   private _onRosterCount: ((count: number) => void) | null = null;
-  // WI #8211: chat and People panels share one slot — roster waits for chat to resolve
-  private _chatNotificationDone = false;
   // Chat commands ("Notetaker, leave"): poll the meeting chat for a command addressed to the bot
   private _chatWatchInterval?: NodeJS.Timeout;
   private _chatWatchBusy = false;
@@ -1183,18 +1180,10 @@ export class TeamsHandler {
    *
    * Non-fatal by design — a failed chat post must never fail the recording.
    *
-   * `onPanelResolved` fires once the chat panel open attempt resolves (opened
-   * or gave up) — roster polling waits on it before opening the People panel,
-   * since only one side panel can be open at a time (WI #8211). Always fires,
-   * even on early return or error.
+   * WI #9469: the roster no longer opens the People panel, so nothing competes with the chat pane for the single
+   * side-panel slot and the roster does not wait for this notice.
    */
-  static async postAdmissionChatNotification(page: Page, onPanelResolved?: () => void): Promise<void> {
-    let panelResolved = false;
-    const resolvePanel = () => {
-      if (panelResolved) return;
-      panelResolved = true;
-      onPanelResolved?.();
-    };
+  static async postAdmissionChatNotification(page: Page): Promise<void> {
     try {
       const namesCsv = process.env.BOT_NAMES_CSV || '';
       const names = namesCsv.split(',').map(n => n.trim()).filter(Boolean);
@@ -1297,8 +1286,6 @@ export class TeamsHandler {
           await page.keyboard.press('Escape').catch(() => {});
         }
       }
-
-      resolvePanel();
 
       if (!openedChat) {
         console.log('[Teams] Chat unavailable — no chat control found (host policy: anonymous/external users excluded, or UI load timeout)');
@@ -1495,15 +1482,14 @@ export class TeamsHandler {
       console.log(`[Teams] ✅ Chat notification posted (input selector: ${successfulSelector})`);
     } catch (err) {
       console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
-    } finally {
-      resolvePanel();
     }
   }
 
   /**
    * Watch the meeting chat for a leave command addressed to the bot ("Notetaker, leave"). Every few seconds it makes
-   * sure the chat pane is open (the People panel can take the slot), reads the visible messages and, on the first
-   * message that is entirely a leave command, posts a short acknowledgement and calls onLeave(requester).
+   * sure the chat pane is open (a user-opened side panel can take the slot), reads the visible messages and, on the
+   * first message that is entirely a leave command, posts a short acknowledgement, waits briefly (WI #9469: 500 ms
+   * polls, 3 s cap) for the acknowledgement to appear in the message list, and calls onLeave(requester).
    * Non-fatal throughout: a chat the bot cannot read (host policy, UI change) never affects the recording.
    */
   startChatCommandWatcher(page: Page, onLeave: (requester: string | null) => void): void {
@@ -1562,9 +1548,18 @@ export class TeamsHandler {
           this._chatCommandFired = true;
           const who = m.author || null;
           console.log(`[Teams][ChatCmd] Leave command received${who ? ` from ${who}` : ''} — acknowledging and leaving`);
-          await TeamsHandler.sendChatMessage(page,
+          const ackSent = await TeamsHandler.sendChatMessage(page,
             `${botName} is leaving this meeting${who ? ` at ${who}'s request` : ' at a participant\'s request'} and has stopped recording.`)
-            .catch(err => console.warn('[Teams][ChatCmd] Acknowledgement failed (non-fatal):', err?.message ?? err));
+            .then(() => true)
+            .catch(err => {
+              console.warn('[Teams][ChatCmd] Acknowledgement failed (non-fatal):', err?.message ?? err);
+              return false;
+            });
+          if (ackSent) {
+            await TeamsHandler.waitForAckRendered(page, botName);
+          } else {
+            console.log('[Teams][ChatCmd] Acknowledgement not sent - leaving without waiting for it');
+          }
           onLeave(who);
           return;
         }
@@ -1574,6 +1569,43 @@ export class TeamsHandler {
         this._chatWatchBusy = false;
       }
     }, INTERVAL_MS);
+  }
+
+  /**
+   * WI #9469: after posting the leave acknowledgement, give Teams a moment to deliver it before the page closes.
+   * Polls the message list every 500 ms for at most 3 s for a message that starts with the acknowledgement wording,
+   * then returns either way. Never throws; logs counts and booleans only.
+   */
+  private static async waitForAckRendered(page: Page, botName: string): Promise<void> {
+    const POLL_MS = 500;
+    const CAP_MS = 3000;
+    const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const ackPrefix = norm(`${botName} is leaving this meeting`);
+    const started = Date.now();
+    const deadline = started + CAP_MS;
+    let polls = 0;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, Math.min(POLL_MS, Math.max(0, deadline - Date.now()))));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      polls++;
+      try {
+        // Bound each read by the time left, so a hung page.evaluate can never hold up the leave
+        const read = await Promise.race([
+          TeamsHandler.readChatMessages(page),
+          new Promise<null>(r => setTimeout(() => r(null), remaining)),
+        ]);
+        if (!read) break;
+        if (read.messages.some(m => norm(m.text).startsWith(ackPrefix))) {
+          console.log(`[Teams][ChatCmd] Acknowledgement seen in the chat after ${Date.now() - started} ms ` +
+            `(${polls} poll(s)) - leaving`);
+          return;
+        }
+      } catch {
+        // Non-fatal: keep polling until the cap
+      }
+    }
+    console.log(`[Teams][ChatCmd] Acknowledgement not seen in the chat within 3s - leaving anyway (${polls} poll(s))`);
   }
 
   stopChatCommandWatcher(): void {
@@ -1608,7 +1640,7 @@ export class TeamsHandler {
         if (!alreadyOpen) {
           await btn.evaluate((el: HTMLElement) => el.click(), undefined, { timeout: 3000 });
           TeamsHandler._chatPaneReopens++;
-          // WI #9463: the count shows whether chat and the People panel keep fighting for the one side-panel slot
+          // WI #9463: the count shows how often another side panel (opened by a user) took the chat pane's slot
           console.log(`[Teams][ChatCmd] Re-opened chat pane via ${selector} (re-open #${TeamsHandler._chatPaneReopens})`);
         }
         const visible = await page.locator(TeamsHandler.COMPOSE_SELECTOR).first()
@@ -1851,13 +1883,6 @@ export class TeamsHandler {
     console.log('[Teams][ChatCmd] Acknowledgement posted to chat');
   }
 
-  /** Unblock the People panel once the chat panel attempt has resolved (WI #8211). */
-  markChatNotificationDone(): void {
-    if (this._chatNotificationDone) return;
-    this._chatNotificationDone = true;
-    console.log('[Teams] Chat panel resolution complete — roster People panel now unblocked');
-  }
-
   /**
    * Turn off camera and microphone on the pre-join screen.
    *
@@ -2057,41 +2082,19 @@ export class TeamsHandler {
    *   1. Teams' in-page call state (`callingService.getActiveCall().participants`)
    *      — camera-agnostic, includes participants outside the visible gallery,
    *      needs no UI interaction. Same technique as the open-source Attendee bot.
-   *   2. The People/roster panel — opened once on first need and left open so
-   *      we don't toggle UI every poll. Panel rows exist for every participant.
-   *   3. Any stream tile (`[data-stream-type][data-tid]`, any stream type) —
-   *      last resort; limited to whoever the gallery is currently rendering.
+   *   2. Any stream tile (`[data-stream-type][data-tid]`, any stream type) —
+   *      fallback when the call state is unreachable or reads empty; limited to
+   *      whoever the gallery is currently rendering.
+   *
+   * WI #9469: the People/roster panel is no longer opened. Clicking it took the
+   * single side-panel slot from the chat pane (killing the join notice), and the
+   * call state alone covered every logged meeting.
    */
   private async pollRoster(page: Page): Promise<void> {
     try {
       let source = 'call-state';
       let names = await this.readRosterFromCallState(page);
 
-      // WI #7919: Supplement call-state with roster panel if count seems low
-      // The organizer may be missing from call.participants but visible in the panel
-      if (names !== null && names.length > 0) {
-        const panelNames = await this.readRosterFromPanel(page);
-        if (panelNames !== null && panelNames.length > names.length) {
-          // Panel has more participants — merge any missing names
-          const callStateSet = new Set(names.map(n => n.toLowerCase()));
-          const supplemented: string[] = [];
-          for (const panelName of panelNames) {
-            if (!callStateSet.has(panelName.toLowerCase())) {
-              supplemented.push(panelName);
-            }
-          }
-          if (supplemented.length > 0) {
-            console.log(`[Teams][Roster] Supplementing call-state with ${supplemented.length} names from panel: ${supplemented.join(', ')}`);
-            names = [...names, ...supplemented];
-            source = 'call-state+panel';
-          }
-        }
-      }
-
-      if (names === null) {
-        source = 'roster-panel';
-        names = await this.readRosterFromPanel(page);
-      }
       if (names === null || names.length === 0) {
         const tileNames = await this.readRosterFromTiles(page);
         if (tileNames.length > 0 || names === null) {
@@ -2277,66 +2280,6 @@ export class TeamsHandler {
       return result.names;
     } catch (e) {
       console.log(`[Teams][Roster] Call-state read failed (non-fatal): ${e}`);
-      return null;
-    }
-  }
-
-  /**
-   * Read participant names from the People/roster panel, opening it once if it
-   * isn't already open. Returns null if the panel can't be found or opened.
-   */
-  private async readRosterFromPanel(page: Page): Promise<string[] | null> {
-    const panelSelector = [
-      '[data-tid="roster"]',
-      '[data-tid="people-pane"]',
-      '[data-tid*="participant-list"]',
-      '[role="tree"][aria-label*="articipant" i]',
-      '[role="tree"][aria-label*="people" i]',
-    ].join(', ');
-    try {
-      let panelOpen = await waitVisible(page.locator(panelSelector).first(), 1000);
-      if (!panelOpen && !this.rosterPanelOpenAttempted && !this._chatNotificationDone) {
-        console.log('[Teams][Roster] Skipping People panel — chat notification still in progress');
-        return null;
-      }
-      if (!panelOpen && !this.rosterPanelOpenAttempted) {
-        this.rosterPanelOpenAttempted = true;
-        const button = page.locator('[data-tid="roster-button"], #roster-button, button[aria-label^="People" i]').first();
-        if (await waitVisible(button, 2000)) {
-          await button.click({ timeout: 3000 });
-          console.log('[Teams][Roster] Opened roster panel (left open for remaining polls)');
-          panelOpen = await page.locator(panelSelector).first()
-            .waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-        }
-      }
-      if (!panelOpen) return null;
-
-      return await page.evaluate((sel) => {
-        const sectionHeader = /^(in this meeting|in the meeting|others invited|waiting in lobby|lobby|suggestions|attendees|presenters|organizers?)\b/i;
-        const names: string[] = [];
-        for (const panel of document.querySelectorAll(sel)) {
-          const rows = panel.querySelectorAll(
-            '[data-tid*="roster-participant"], [data-tid^="participantsInCall-"], [role="treeitem"], [role="listitem"]'
-          );
-          for (const row of rows) {
-            // Skip rows under a lobby / "others invited" section
-            const group = row.closest('[role="group"], [role="treeitem"][aria-expanded]');
-            const groupLabel = group && group !== row ? (group.getAttribute('aria-label') || '') : '';
-            if (/lobby|invited|suggest/i.test(groupLabel)) continue;
-            if (row.getAttribute('aria-expanded') !== null) continue; // section header
-
-            const titled = row.querySelector('span[title], [data-tid*="display-name"], [data-tid*="participant-name"]');
-            const raw = titled?.getAttribute('title')
-              || titled?.textContent
-              || (row.getAttribute('aria-label') || '').split(',')[0];
-            const name = (raw || '').trim();
-            if (name && name.length <= 128 && !sectionHeader.test(name)) names.push(name);
-          }
-        }
-        return names;
-      }, panelSelector);
-    } catch (e) {
-      console.log(`[Teams][Roster] Roster panel read failed (non-fatal): ${e}`);
       return null;
     }
   }
