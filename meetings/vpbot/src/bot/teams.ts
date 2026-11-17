@@ -39,7 +39,7 @@ import { S3Service } from '../transcribe/s3.js';
 import { refreshTeamsSession } from './teams-auth.js';
 import { ActiveSpeakerEntry } from '../types.js';
 import { isNotetakerBot } from './notetaker-bots.js';
-import { isLeaveCommand } from './chat-commands.js';
+import { isLeaveCommand, leaveCommandPageSpec } from './chat-commands.js';
 
 // WI #8576: how long the bot waits in the Teams lobby to be admitted before giving up and
 // reporting status=failed / reason=lobby_timeout. Override with FIRM_LOBBY_TIMEOUT_SECONDS.
@@ -113,6 +113,8 @@ async function waitVisible(locator: Locator, timeout: number): Promise<boolean> 
 const CAPTIONS_CONTAINER_SELECTOR = '[data-tid="closed-caption-v2-virtual-list-content"]';
 /** Page binding the caption MutationObserver reports finalized utterances through (WI #8877) */
 const CAPTION_BINDING_NAME = '__firmOnCaptionUtterance';
+/** WI #9468: page binding for a spoken command matched in a caption ({command, speaker} only) */
+const CAPTION_COMMAND_BINDING_NAME = '__firmOnCaptionCommand';
 /** A caption element unchanged for this long is treated as a finalized utterance */
 const CAPTION_SETTLE_MS = 300;
 
@@ -138,6 +140,15 @@ function isOwnBotChatMessage(text: string, botName: string): boolean {
   return !!t && ownBotChatPrefixes(botName).some(p => t.startsWith(norm(p)));
 }
 
+/**
+ * WI #9468: a spoken command matched inside the page. Only the command and the speaker's caption name cross the
+ * page boundary; the caption text never does.
+ */
+interface CaptionCommand {
+  command: string;
+  speaker: string;
+}
+
 /** One finalized caption utterance; times are absolute epoch ms from the page clock */
 interface CaptionUtterance {
   name: string;
@@ -154,7 +165,11 @@ export class TeamsHandler {
   // Chat commands ("Notetaker, leave"): poll the meeting chat for a command addressed to the bot
   private _chatWatchInterval?: NodeJS.Timeout;
   private _chatWatchBusy = false;
+  // Single-fire guard shared by the typed (chat) and spoken (caption) leave commands
   private _chatCommandFired = false;
+  // WI #9468: spoken "Notetaker, leave" via live captions; null when SPOKEN_LEAVE_COMMAND=0
+  private _onSpokenLeave: ((speaker: string | null) => void) | null = null;
+  private _spokenLeaveUnavailableLogged = false;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
@@ -1545,6 +1560,7 @@ export class TeamsHandler {
           if (!isLeaveCommand(m.text, botName)) continue;
           if (m.author && m.author.toLowerCase().includes(botName.toLowerCase())) continue; // never obey ourselves
           if (isOwnBotChatMessage(m.text, botName)) continue; // WI #9463: second self-filter, by our own wording
+          if (this._chatCommandFired) return; // WI #9468: a spoken command won the shared guard during this poll
           this._chatCommandFired = true;
           const who = m.author || null;
           console.log(`[Teams][ChatCmd] Leave command received${who ? ` from ${who}` : ''} — acknowledging and leaving`);
@@ -2337,8 +2353,14 @@ export class TeamsHandler {
    * utterance is reported back with its speaker and start/end times (caption
    * text never leaves the page), and consecutive same-speaker utterances are
    * merged into one log entry.
+   *
+   * WI #9468: when onSpokenLeave is given (SPOKEN_LEAVE_COMMAND is not 0), the page also tests every finalized
+   * utterance, revisions included, against the chat command's whole-utterance leave regex. A match sends only
+   * {command, speaker} out of the page, and handleCaptionCommand acknowledges in chat and calls onSpokenLeave
+   * through the same single-fire guard as the typed command.
    */
-  startActiveSpeakerPolling(page: Page, recordingStartMs: number): void {
+  startActiveSpeakerPolling(page: Page, recordingStartMs: number, onSpokenLeave?: (speaker: string | null) => void): void {
+    this._onSpokenLeave = onSpokenLeave ?? null;
     this._recordingStartMs = recordingStartMs;
     this._speakerPollCount = 0;
     this._speakerPage = page;
@@ -2355,18 +2377,45 @@ export class TeamsHandler {
     } catch (err) {
       if (!String(err).includes('has been already registered')) throw err;
     }
+    // WI #9468: the spoken-command binding (registered only when the spoken path is enabled)
+    const spokenLeaveEnabled = !!this._onSpokenLeave;
+    if (spokenLeaveEnabled) {
+      try {
+        await page.exposeFunction(CAPTION_COMMAND_BINDING_NAME, (c: CaptionCommand) => this.handleCaptionCommand(page, c));
+      } catch (err) {
+        if (!String(err).includes('has been already registered')) throw err;
+      }
+    }
 
     const found = await page.waitForSelector(CAPTIONS_CONTAINER_SELECTOR, { state: 'attached', timeout: 30000 })
       .then(() => true).catch(() => false);
     if (!found) {
       console.log('[Teams][ActiveSpeaker] Caption container not found — active speaker log will be empty');
+      if (spokenLeaveEnabled && !this._spokenLeaveUnavailableLogged) {
+        this._spokenLeaveUnavailableLogged = true;
+        console.log('[Teams][VoiceCmd] Spoken leave unavailable - captions not running');
+      }
       return;
     }
     if (!this._speakerCaptureActive) return;
 
-    await page.evaluate(({ containerSelector, bindingName, settleMs }) => {
+    // WI #9468: the chat command's regex, passed as source/flags (null disables the spoken test in the page)
+    const leaveSpec = spokenLeaveEnabled ? leaveCommandPageSpec(process.env.BOT_NAME || 'Fortress Notetaker') : null;
+
+    await page.evaluate(({ containerSelector, bindingName, settleMs, commandBindingName, leaveSpec }) => {
       const w = window as any;
       w.__firmCaptionObserver?.stop();
+
+      // WI #9468: spoken "Notetaker, leave". Normalise the caption text, apply the same length cap and test it with
+      // the same whole-utterance regex as the chat command. Only {command, speaker} leaves the page.
+      const leaveRe = leaveSpec ? new RegExp(leaveSpec.source, leaveSpec.flags) : null;
+      const notetakerRe = leaveSpec ? new RegExp(leaveSpec.notetakerSource, 'gi') : null;
+      const testSpokenCommand = (name: string, text: string) => {
+        if (!leaveRe || !notetakerRe || !leaveSpec || !name || !text) return;
+        const norm = text.replace(notetakerRe, 'notetaker').replace(/\s+/g, ' ').trim();
+        if (!norm || norm.length > leaveSpec.maxChars || !leaveRe.test(norm)) return;
+        try { w[commandBindingName]({ command: 'leave', speaker: name }); } catch { /* binding gone: page closing */ }
+      };
 
       const CAPTION_SELECTOR = '[data-tid="closed-caption-text"]';
       const AUTHOR_SELECTOR = '[data-tid="author"]';
@@ -2394,6 +2443,8 @@ export class TeamsHandler {
         s.timer = null;
         if (!s.name || !s.text) return;
         const revision = s.finalized;
+        // WI #9468: test before the de-duplication below so a repeated command still counts; skip the stop() flush
+        if (!collect) testSpokenCommand(s.name, s.text);
         if (!revision) {
           const key = `${s.name}\u0000${s.text}`;
           if (reportedKeys.includes(key)) return;
@@ -2472,8 +2523,53 @@ export class TeamsHandler {
           return pending;
         },
       };
-    }, { containerSelector: CAPTIONS_CONTAINER_SELECTOR, bindingName: CAPTION_BINDING_NAME, settleMs: CAPTION_SETTLE_MS });
-    console.log('[Teams][ActiveSpeaker] Caption MutationObserver attached');
+    }, {
+      containerSelector: CAPTIONS_CONTAINER_SELECTOR,
+      bindingName: CAPTION_BINDING_NAME,
+      settleMs: CAPTION_SETTLE_MS,
+      commandBindingName: CAPTION_COMMAND_BINDING_NAME,
+      leaveSpec,
+    });
+    console.log(`[Teams][ActiveSpeaker] Caption MutationObserver attached` +
+      `${spokenLeaveEnabled ? ' (spoken leave command enabled)' : ''}`);
+  }
+
+  /**
+   * WI #9468: a spoken leave command matched in the page. Shares the single-fire guard with the typed command,
+   * posts the existing acknowledgement worded as a spoken request, waits briefly for it to render, then calls
+   * onSpokenLeave. Never logs caption text (the page never sends it).
+   */
+  private async handleCaptionCommand(page: Page, c: CaptionCommand): Promise<void> {
+    const onLeave = this._onSpokenLeave;
+    if (!onLeave || c?.command !== 'leave') return;
+    if (this._chatCommandFired) return;
+    const botName = process.env.BOT_NAME || 'Fortress Notetaker';
+    const speaker = typeof c.speaker === 'string' ? c.speaker.trim().slice(0, 100) : '';
+    if (speaker && speaker.toLowerCase().includes(botName.toLowerCase())) return; // never obey ourselves
+    this._chatCommandFired = true;
+    console.log(`[Teams][VoiceCmd] Leave command spoken by ${speaker || 'a participant'} — acknowledging and leaving`);
+    try {
+      // Let an in-flight chat poll finish with the chat pane before posting (it stops at the guard), max 5 s
+      for (let i = 0; i < 25 && this._chatWatchBusy; i++) await new Promise(r => setTimeout(r, 200));
+      this._chatWatchBusy = true;
+      const ackSent = await TeamsHandler.sendChatMessage(page,
+        `${botName} is leaving this meeting${speaker ? ` at ${speaker}'s spoken request` : ' at a participant\'s spoken request'} and has stopped recording.`)
+        .then(() => true)
+        .catch(err => {
+          console.warn('[Teams][VoiceCmd] Acknowledgement failed (non-fatal):', err?.message ?? err);
+          return false;
+        });
+      if (ackSent) {
+        await TeamsHandler.waitForAckRendered(page, botName);
+      } else {
+        console.log('[Teams][VoiceCmd] Acknowledgement not sent - leaving without waiting for it');
+      }
+    } catch (err: any) {
+      console.warn('[Teams][VoiceCmd] Acknowledgement error (non-fatal):', err?.message ?? err);
+    } finally {
+      this._chatWatchBusy = false;
+    }
+    onLeave(speaker || null);
   }
 
   /** Fold one finalized caption utterance (absolute epoch ms) into the speaker log */
