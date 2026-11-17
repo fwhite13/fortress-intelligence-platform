@@ -257,8 +257,15 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
 
     // MeetingBot uses .join() not .start()
     bot.join().catch(reject);
-  });
+  // WI #9529: on success or failure, never let the caller's process.exit cut an in-flight stop() short (Teams Leave
+  // step, then page / context / browser close). stop() already runs the Leave click before 'recording-stopped', so
+  // this normally returns at once; it is bounded so a hung browser close cannot hold the exit, and the SIGTERM grace
+  // cap (SIGTERM_GRACE_CAP_MS) still applies on top. Never throws, so the original outcome is preserved.
+  }).finally(() => bot.waitForStopToFinish(STOP_FINISH_WAIT_MS));
 }
+
+/** WI #9529: max wait for stop() to return before the one-shot runner exits (Leave step is bounded to 6 s). */
+const STOP_FINISH_WAIT_MS = 15_000;
 
 /**
  * ECS StopTask sends SIGTERM and SIGKILLs after the task definition's stopTimeout (set to 120s). Cap how long we

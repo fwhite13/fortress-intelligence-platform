@@ -106,6 +106,11 @@ export class MeetingBot extends EventEmitter {
   private _deadRoom = false;
   // WI #8083: true once the roster has shown anyone besides the bot. Never reset.
   private _hasHadOtherParticipants = false;
+  // WI #9529: single-fire guard for the Teams Leave step - stop() runs it before emitting 'recording-stopped',
+  // so cleanup() must not click a second time.
+  private _teamsLeaveAttempted = false;
+  // WI #9529: the in-flight (or finished) stop(), so the one-shot runner can wait for it before process.exit.
+  private _stopPromise: Promise<string> | null = null;
 
   constructor(meeting: Meeting, recordingsDir: string) {
     super();
@@ -864,7 +869,56 @@ export class MeetingBot extends EventEmitter {
     if (!this.isRecording) {
       throw new Error('Not currently recording');
     }
+    // WI #9529: stopInner() clears isRecording synchronously (before its first await), so a second stop() still
+    // throws 'Not currently recording' exactly as before; the promise is kept for waitForStopToFinish().
+    const p = this.stopInner(reason);
+    this._stopPromise = p;
+    return p;
+  }
 
+  /**
+   * WI #9529: wait (bounded) for an in-flight stop() to return - i.e. the Teams Leave step and the page/context/
+   * browser close have run - so the one-shot runner never calls process.exit in the middle of it. Resolves at once
+   * if stop() was never called. Never throws. Returns true if stop() finished within maxWaitMs.
+   */
+  async waitForStopToFinish(maxWaitMs: number): Promise<boolean> {
+    const p = this._stopPromise;
+    if (!p) return true;
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finished = await Promise.race([
+      p.then(() => true, () => true),
+      new Promise<boolean>(r => { timer = setTimeout(() => r(false), maxWaitMs); }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!finished) {
+      console.warn(`[Bot] stop() still running after ${maxWaitMs} ms - exiting anyway`);
+    } else if (Date.now() - startedAt > 50) {
+      console.log(`[Bot] Waited ${Date.now() - startedAt} ms for stop() to finish before exiting`);
+    }
+    return finished;
+  }
+
+  /**
+   * WI #9529: Teams only - run the bounded Leave click (clickTeamsLeave: 6 s overall, never throws) at most once per
+   * bot. stop() calls this BEFORE emitting 'recording-stopped' (the one-shot runner exits after the upload, which
+   * used to kill an in-flight click); cleanup() calls it too for the paths that never reach stop() (lobby timeout,
+   * join denied) and is a no-op after stop() has run it. Zoom / Google Meet: no-op.
+   */
+  private async leaveTeamsOnce(): Promise<void> {
+    if (this.meeting.platform !== 'teams' || this._teamsLeaveAttempted) return;
+    this._teamsLeaveAttempted = true;
+    const page = this.page;
+    if (!page || page.isClosed()) {
+      console.log('[Bot] Teams Leave step skipped - page already closed');
+      return;
+    }
+    const startedAt = Date.now();
+    await this.clickTeamsLeave(page).catch(() => {});
+    console.log(`[Bot] Teams Leave step finished in ${Date.now() - startedAt} ms`);
+  }
+
+  private async stopInner(reason: string): Promise<string> {
     console.log(`[Bot] Stopping recording — reason: ${reason}`);
 
     // Clear end-detection timers
@@ -942,6 +996,12 @@ export class MeetingBot extends EventEmitter {
     if (this._zoomHandler) {
       this._zoomHandler.stopRosterPolling();
     }
+
+    // WI #9529: Teams - leave the call BEFORE emitting 'recording-stopped'. The one-shot runner uploads on that event
+    // and then calls process.exit(0); a short upload used to exit while cleanup()'s Leave click was still in flight
+    // (prod meeting 178), leaving the bot in the participant list. FFmpeg has already exited, so no audio is lost;
+    // the delay is bounded by clickTeamsLeave's 6 s. Zoom / Google Meet: no-op.
+    await this.leaveTeamsOnce();
 
     if (this._deadRoom) {
       console.log('[Bot] Dead room — skipping recording-stopped (no upload, no recording_complete)');
@@ -1089,9 +1149,10 @@ export class MeetingBot extends EventEmitter {
    */
   async cleanup(): Promise<void> {
     try {
-      // WI #9469: Teams only — hang up through Teams' Leave control first (bounded, non-fatal); Zoom/Meet unchanged
+      // WI #9469: Teams only — hang up through Teams' Leave control first (bounded, non-fatal); Zoom/Meet unchanged.
+      // WI #9529: single-fire - a no-op when stop() already ran the Leave step before emitting 'recording-stopped'.
       if (this.page && this.meeting.platform === 'teams' && !this.page.isClosed()) {
-        await this.clickTeamsLeave(this.page).catch(() => {});
+        await this.leaveTeamsOnce();
       }
       if (this.page) {
         await this.page.close().catch(() => {});
