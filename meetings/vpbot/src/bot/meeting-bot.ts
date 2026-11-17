@@ -379,7 +379,18 @@ export class MeetingBot extends EventEmitter {
         // Before roster polling so the People panel can't take keyboard focus from the shortcut.
         await TeamsHandler.enableLiveCaptions(this.page);
         this._teamsHandler.startRosterPolling(this.page, (count) => this.handleRosterCount(count));
-        this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime);
+        // WI #9468: spoken "Notetaker, leave" via live captions. SPOKEN_LEAVE_COMMAND=0 is its own kill switch,
+        // independent of CHAT_LEAVE_COMMAND; the single-fire guard is shared with the chat command.
+        const onSpokenLeave = process.env.SPOKEN_LEAVE_COMMAND !== '0'
+          ? (speaker: string | null) => {
+              if (!this.isRecording) return;
+              console.log(`[Bot] Leaving at a spoken request${speaker ? ` from ${speaker}` : ''}`);
+              this.stop('spoken-leave-request').catch(err =>
+                console.error('[Bot] Error stopping after spoken leave request:', err)
+              );
+            }
+          : undefined;
+        this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime, onSpokenLeave);
       }
       if (this._zoomHandler && this.page) {
         this._zoomHandler.startRosterPolling(this.page, this.meeting.botName);
