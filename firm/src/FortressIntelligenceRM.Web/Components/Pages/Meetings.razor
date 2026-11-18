@@ -851,6 +851,22 @@
         }
     }
 
+    /// <summary>WI #9679 — the Remove confirmation, true to what MeetingService.RemoveMeetingAsync deletes: a
+    /// meeting's own recording, transcript, summary and mind map, except when they are shared (a subscriber row
+    /// shows its primary's; a primary with subscribers keeps them for the subscribers). Copies already pushed to
+    /// the FAIT knowledge base (manual push or FAIT auto-import) are never removed by FIRM.</summary>
+    private static string RemoveConfirmText(FirmMeeting? meeting)
+    {
+        const string kb = " A copy already sent to the knowledge base is not removed.";
+        if (meeting?.PrimaryMeetingId != null)
+            return "Are you sure? This removes the meeting from your list. Its recording, transcript and summary " +
+                   "belong to the shared recording of this meeting and are kept." + kb;
+        if (meeting?.HasSubscribers == true)
+            return "Are you sure? This removes the meeting from your list. Other people are subscribed to this " +
+                   "recording, so its recording, transcript and summary are kept." + kb;
+        return "Are you sure? This will permanently delete the recording, transcript, summary and mind map of this meeting." + kb;
+    }
+
     private async Task RemoveMeeting(long meetingId)
     {
         var options = new DialogOptions
@@ -861,7 +877,7 @@
         };
         var parameters = new DialogParameters
         {
-            { "ContentText", "Are you sure? This will permanently delete the recording, transcript, and summary of this meeting." },
+            { "ContentText", RemoveConfirmText(_meetings.FirstOrDefault(m => m.Id == meetingId)) },
             { "ButtonText", "Delete" },
             { "Color", Color.Error }
         };
