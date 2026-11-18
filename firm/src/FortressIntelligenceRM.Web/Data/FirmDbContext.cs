@@ -51,6 +51,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.ExpoPushToken).HasColumnName("expo_push_token").HasMaxLength(200);
             entity.Property(e => e.AutoAddCalendarMeetings).HasColumnName("auto_add_calendar_meetings").HasDefaultValue(false);
             entity.Property(e => e.AutoEmailSummary).HasColumnName("auto_email_summary").HasDefaultValue(false);
+            entity.Property(e => e.NotifyMeetingProblems).HasColumnName("notify_meeting_problems").HasDefaultValue(true); // WI #9644
             entity.Property(e => e.AutoCreateSuggestedEvents).HasColumnName("auto_create_suggested_events").HasDefaultValue(false);
             entity.Property(e => e.VoiceEnrollmentPendingSince).HasColumnName("voice_enrollment_pending_since");
         });
@@ -126,6 +127,9 @@ public class FirmDbContext : DbContext
             // WI #9131 — external source id (e.g. "plaud:<file_id>") and its per-user dedupe guard.
             // As above, the DB-level index is created by DatabaseInitializationService's raw SQL.
             entity.Property(e => e.ExternalId).HasColumnName("external_id").HasMaxLength(128);
+            // WI #9644 — owner alert dedupe stamps
+            entity.Property(e => e.AdmissionWarningSentAt).HasColumnName("admission_warning_sent_at");
+            entity.Property(e => e.FailureAlertSentAt).HasColumnName("failure_alert_sent_at");
             entity.HasIndex(e => new { e.CreatedBy, e.ExternalId })
                 .IsUnique()
                 .HasDatabaseName("uk_fm_created_by_external_id")

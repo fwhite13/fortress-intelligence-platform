@@ -21,6 +21,8 @@ public class FirmUser
     public string? ExpoPushToken { get; set; }
     public bool AutoAddCalendarMeetings { get; set; }
     public bool AutoEmailSummary { get; set; }
+    // WI #9644 — owner-only problem emails (admission warning + failure alert). Default on for existing and new users.
+    public bool NotifyMeetingProblems { get; set; } = true;
     // WI #8310 — gates Suggested Events create/edit (Graph Calendars.ReadWrite); always false until incremental consent ships
     public bool AutoCreateSuggestedEvents { get; set; }
     // WI #8349 — set when a voice sample Batch job is submitted; cleared once its voice_sample row lands (or it goes stale)
