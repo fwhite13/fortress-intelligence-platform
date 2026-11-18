@@ -407,29 +407,10 @@ public class MeetingsApiController : ControllerBase
 
             // ADO#4: Auto-email PDF summary to the meeting owner if they've opted in.
             // Non-fatal — email delivery failure must not fail the VP callback.
+            // WI #9742: the rules live in TryAutoEmailSummaryAsync, shared with the subscriber loop below.
             if (meeting != null)
             {
-                try
-                {
-                    var owner = await db.Users.FindAsync(meeting.CreatedBy);
-                    // WI #9134 / ruling D14: no auto-email for Plaud backfills or recordings > 24 h old at import.
-                    if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email)
-                        && await FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.SuppressUserNotificationsAsync(db, meeting))
-                    {
-                        _logger.LogInformation("FIRM: Auto-email suppressed for old/backfilled Plaud import {Id} (D14)", payload.MeetingId);
-                    }
-                    else if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email))
-                    {
-                        var meetingTitle = meeting.Title ?? $"Meeting {payload.MeetingId}";
-                        var pdfBytes = _pdfService.BuildPdf(payload.Summary.SummaryText ?? "", meetingTitle, _branding.PrimaryColor);
-                        await _emailService.SendMeetingSummaryAsync(owner.Email, meetingTitle, pdfBytes);
-                        _logger.LogInformation("FIRM: Auto-emailed PDF summary for meeting {Id} to {Email}", payload.MeetingId, owner.Email);
-                    }
-                }
-                catch (Exception emailEx)
-                {
-                    _logger.LogWarning(emailEx, "FIRM: Failed to auto-email PDF summary for meeting {Id} (non-fatal)", payload.MeetingId);
-                }
+                await TryAutoEmailSummaryAsync(db, meeting, payload.Summary.SummaryText);
             }
 
             // Write summary to S3 so DownloadSummary and KB push can find it
@@ -480,13 +461,28 @@ public class MeetingsApiController : ControllerBase
 
             FireCompletionNotifications(payload.MeetingId, payload.MeetingId);
 
+            // WI #9742: subscribers get the auto-emailed PDF too, under their own AutoEmailSummary/Email.
+            // Same gate as the primary's email above (this callback carried the summary, the primary row
+            // exists); the subscriber has no summary row, so it gets the primary's (artifact) summary text.
+            var emailSubscribers = payload.Summary != null && meeting != null;
+            var subscriberSummaryText = payload.Summary?.SummaryText;
+            var primaryOwnerId = meeting?.CreatedBy;
+
             _ = Task.Run(async () =>
             {
                 try
                 {
                     var subscriberIds = await _meetingService.GetSubscriberIdsAsync(payload.MeetingId);
+                    // A user is emailed at most once per meeting: the primary's owner is seeded so a
+                    // (by construction impossible) subscriber row of the same user is skipped.
+                    var emailedUserIds = new HashSet<Guid>();
+                    if (primaryOwnerId is { } pid) emailedUserIds.Add(pid);
                     foreach (var subscriberId in subscriberIds)
+                    {
                         FireCompletionNotifications(subscriberId, payload.MeetingId);
+                        if (emailSubscribers)
+                            await TryAutoEmailSummaryAsync(subscriberId, subscriberSummaryText, emailedUserIds);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -496,6 +492,62 @@ public class MeetingsApiController : ControllerBase
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    /// WI #9742: auto-emails the PDF summary to one meeting row's owner (ADO#4 rules, extracted from
+    /// VpCallback). Sends only when the owner exists, has AutoEmailSummary on and a non-empty Email,
+    /// and the row is not a suppressed Plaud import (WI #9134 / D14). The PDF title is the row's own
+    /// title; <paramref name="summaryText"/> is the shared (artifact) summary. Never throws.
+    /// <paramref name="emailedUserIds"/> (subscriber loop only): owners already emailed for this
+    /// meeting are skipped, and an owner emailed here is added.
+    /// </summary>
+    private async Task TryAutoEmailSummaryAsync(FirmDbContext db, FirmMeeting meeting, string? summaryText, ISet<Guid>? emailedUserIds = null)
+    {
+        try
+        {
+            var owner = await db.Users.FindAsync(meeting.CreatedBy);
+            if (owner != null && emailedUserIds != null && emailedUserIds.Contains(owner.Id))
+                return;
+            // WI #9134 / ruling D14: no auto-email for Plaud backfills or recordings > 24 h old at import.
+            if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email)
+                && await FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.SuppressUserNotificationsAsync(db, meeting))
+            {
+                _logger.LogInformation("FIRM: Auto-email suppressed for old/backfilled Plaud import {Id} (D14)", meeting.Id);
+            }
+            else if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email))
+            {
+                var meetingTitle = meeting.Title ?? $"Meeting {meeting.Id}";
+                var pdfBytes = _pdfService.BuildPdf(summaryText ?? "", meetingTitle, _branding.PrimaryColor);
+                await _emailService.SendMeetingSummaryAsync(owner.Email, meetingTitle, pdfBytes);
+                emailedUserIds?.Add(owner.Id);
+                _logger.LogInformation("FIRM: Auto-emailed PDF summary for meeting {Id} to {Email}", meeting.Id, owner.Email);
+            }
+        }
+        catch (Exception emailEx)
+        {
+            _logger.LogWarning(emailEx, "FIRM: Failed to auto-email PDF summary for meeting {Id} (non-fatal)", meeting.Id);
+        }
+    }
+
+    /// <summary>
+    /// WI #9742: subscriber form of <see cref="TryAutoEmailSummaryAsync(FirmDbContext, FirmMeeting, string?, ISet{Guid}?)"/>
+    /// for the fire-and-forget loop — loads the row in its own DbContext (the request's is gone).
+    /// Never throws, so one subscriber cannot stop the loop or fail the callback.
+    /// </summary>
+    private async Task TryAutoEmailSummaryAsync(long meetingId, string? summaryText, ISet<Guid>? emailedUserIds)
+    {
+        try
+        {
+            await using var emailDb = await _dbFactory.CreateDbContextAsync();
+            var row = await emailDb.Meetings.FindAsync(meetingId);
+            if (row == null) return;
+            await TryAutoEmailSummaryAsync(emailDb, row, summaryText, emailedUserIds);
+        }
+        catch (Exception emailEx)
+        {
+            _logger.LogWarning(emailEx, "FIRM: Failed to auto-email PDF summary for meeting {Id} (non-fatal)", meetingId);
+        }
     }
 
     /// <summary>
