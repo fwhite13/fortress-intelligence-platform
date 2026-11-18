@@ -256,6 +256,10 @@ builder.Services.AddDataProtection()
 
 var app = builder.Build();
 
+// WI #9743: state the FAIT KB master switch (Firm:FaitKbEnabled) once at startup. No URLs or secrets.
+app.Logger.LogInformation("FAIT KB integration: {State}",
+    FortressIntelligenceRM.Web.Services.FaitKb.IsEnabled(app.Configuration) ? "enabled" : "disabled");
+
 // Health endpoint
 app.MapGet("/health", (BrandingConfig b) => Results.Ok(new { status = "healthy", service = b.ModuleName.ToLower(), timestamp = DateTime.UtcNow })).AllowAnonymous();
 

@@ -791,8 +791,9 @@ public class MeetingService
             await db.SaveChangesAsync();
         }
 
-        // Populate FaitUserId if not already set — best-effort, never throws
-        if (string.IsNullOrEmpty(user.FaitUserId))
+        // Populate FaitUserId if not already set — best-effort, never throws.
+        // WI #9743: not when the FAIT KB switch is off (the user simply has no FaitUserId).
+        if (string.IsNullOrEmpty(user.FaitUserId) && FaitKb.IsEnabled(_config))
         {
             try
             {
@@ -816,7 +817,9 @@ public class MeetingService
 
     private async Task<string?> ResolveFaitUserIdAsync(string entraOid)
     {
-        var faitApiUrl = _config["FIP:FaitApiUrl"]?.TrimEnd('/') ?? "https://fait.dev.fortressam.ai";
+        // WI #9743: null when the FAIT KB switch is off; never fall back to the Fortress dev URL then.
+        var faitApiUrl = FaitKb.ApiUrlOrDefault(_config)?.TrimEnd('/');
+        if (faitApiUrl == null) return null;
         var sharedSecret = _config["Firm:SharedSecret"] ?? "";
         if (string.IsNullOrEmpty(sharedSecret))
         {

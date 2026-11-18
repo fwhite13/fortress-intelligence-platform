@@ -509,7 +509,11 @@ public class MeetingsApiController : ControllerBase
     /// </summary>
     private void FireCompletionNotifications(long meetingId, long artifactMeetingId)
     {
-        // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB
+        // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB.
+        // WI #9743: only when the FAIT KB switch is on (null URL = off), so with it off nothing is
+        // loaded or assembled for FAIT; the mind map and Expo push below still run.
+        var faitApiUrl = FaitKb.ApiUrlOrDefault(_config);
+        if (faitApiUrl != null)
         _ = Task.Run(async () =>
         {
             try
@@ -522,7 +526,6 @@ public class MeetingsApiController : ControllerBase
                     .FirstOrDefaultAsync(m => m.Id == meetingId);
                 if (completedMeeting?.CreatedByUser == null) return;
 
-                var faitApiUrl = _config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
                 var sharedSecret = _config["Firm:SharedSecret"] ?? "";
 
                 // Assemble transcript text — from the artifact meeting (shared content for subscribers)
@@ -874,6 +877,8 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> PushTranscriptToKb(long id)
     {
+        if (!FaitKb.IsEnabled(_config)) return NotFound(new { error = FaitKb.DisabledMessage }); // WI #9743
+
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
@@ -900,6 +905,8 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> PushSummaryToKb(long id)
     {
+        if (!FaitKb.IsEnabled(_config)) return NotFound(new { error = FaitKb.DisabledMessage }); // WI #9743
+
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
@@ -925,6 +932,8 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> PushToKb(long id, [FromBody] PushToKbRequest request)
     {
+        if (!FaitKb.IsEnabled(_config)) return NotFound(new { error = FaitKb.DisabledMessage }); // WI #9743
+
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
@@ -1039,7 +1048,7 @@ public class MeetingsApiController : ControllerBase
     [HttpGet("/api/firm/user-teams-local")]
     public async Task<IActionResult> GetUserTeamsLocal()
     {
-        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
+        var faitUrl = FaitKb.ApiUrlOrEmpty(_config); // WI #9743: empty when the FAIT KB switch is off
         var secret = _config["Firm:SharedSecret"] ?? "";
         if (string.IsNullOrEmpty(faitUrl)) return Ok(new List<object>());
         try

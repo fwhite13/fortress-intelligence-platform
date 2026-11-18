@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using FortressIntelligenceRM.Web.Services;
 
 namespace FortressIntelligenceRM.Web.Controllers;
 
@@ -130,7 +131,7 @@ public class GraphProxyController : ControllerBase
             }
         }
 
-        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
+        var faitUrl = FaitKb.ApiUrlOrEmpty(_config); // WI #9743: empty when the FAIT KB switch is off
 
         if (string.IsNullOrEmpty(faitUrl))
             return Ok(new List<object>());
