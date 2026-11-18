@@ -30,6 +30,7 @@ public class StuckMeetingRecoveryService : BackgroundService
     private readonly IAmazonECS _ecs;
     private readonly IConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly MeetingAlertService _alerts; // WI #9644
     private readonly ILogger<StuckMeetingRecoveryService> _logger;
 
     public StuckMeetingRecoveryService(
@@ -37,12 +38,14 @@ public class StuckMeetingRecoveryService : BackgroundService
         IAmazonECS ecs,
         IConfiguration config,
         IServiceScopeFactory scopeFactory,
+        MeetingAlertService alerts,
         ILogger<StuckMeetingRecoveryService> logger)
     {
         _dbFactory = dbFactory;
         _ecs = ecs;
         _config = config;
         _scopeFactory = scopeFactory;
+        _alerts = alerts;
         _logger = logger;
     }
 
@@ -162,6 +165,7 @@ public class StuckMeetingRecoveryService : BackgroundService
             _logger.LogWarning(
                 "FIRM: StuckMeetingRecovery — meeting {Id} {OldStatus} → Failed (bot task {Arn}: {TaskStatus}), LastFailureReason={Reason}",
                 m.Id, m.Status, m.BotTaskArn ?? "(none)", lastStatus ?? "not found", FailureReason);
+            _alerts.NotifyFailure(meeting.Id); // WI #9644 — owner failure alert (fire-and-forget, deduped per run)
 
             if (meeting.IsPrimaryRecorder)
             {

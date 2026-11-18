@@ -284,6 +284,9 @@ public class MeetingAlertService
 
             var skip = GetFailureSkipReason(meeting, meeting.CreatedByUser, now);
             if (skip != null) { LogSkipped(kind, meetingId, skip); return; }
+            // Ruling D14: no user notifications for Plaud backfills or recordings more than 24 h old at import.
+            if (await FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.SuppressUserNotificationsAsync(db, meeting))
+            { LogSkipped(kind, meetingId, "plaud-backfill-or-old"); return; }
 
             var claimed = await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE firm_meetings SET failure_alert_sent_at = UTC_TIMESTAMP() WHERE id = {meetingId} AND failure_alert_sent_at IS NULL AND status = 'Failed'");
