@@ -7,6 +7,7 @@
     <title>@Branding.ModuleName — @Branding.ModuleFullName</title>
     <base href="/" />
     @* WI #9139 — installable on iPhone ("Add to Home Screen" opens /upload full-screen). No service worker. *@
+    @* WI #9680: served by the /manifest.webmanifest endpoint in Program.cs (name from BrandingConfig). *@
     <link rel="manifest" href="manifest.webmanifest" />
     <meta name="theme-color" content="#1a2332" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

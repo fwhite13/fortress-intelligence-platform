@@ -18,6 +18,15 @@ public class BrandingConfig
     public string? NotetakerNameOverride { get; set; }
     public string NotetakerName => NotetakerNameOverride ?? $"{OrgName} Notetaker";
 
+    /// <summary>WI #9680: true when ModuleName already names the org (RN: "Refuge Notetaker" starts with
+    /// "Refuge"), so UI that would print OrgName next to ModuleName prints ModuleName alone.</summary>
+    public bool ModuleNameIncludesOrg =>
+        ModuleName.StartsWith(OrgName ?? "", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>WI #9680: "{OrgName} {ModuleName}" ("Fortress FIRM"), or ModuleName alone when it already
+    /// starts with OrgName ("Refuge Notetaker").</summary>
+    public string OrgModuleName => ModuleNameIncludesOrg ? ModuleName : $"{OrgName} {ModuleName}";
+
     public bool IsHomeTenant(string? tenantId) =>
         !string.IsNullOrEmpty(tenantId) &&
         tenantId.StartsWith(HomeTenantId[..8], StringComparison.OrdinalIgnoreCase);

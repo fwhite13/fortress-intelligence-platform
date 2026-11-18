@@ -164,12 +164,10 @@ public class CalendarService
 
                 var tenantId = ExtractTenantId(joinUrl);
                 var organizerEmail = ev.Organizer?.EmailAddress?.Address?.Trim().ToLower() ?? "";
-                var currentUserEmail = userEmail.Trim().ToLower();
 
-                // Mode A is only applicable to Teams meetings in the home tenant
-                var isFortressTenant = platform == "teams" && _branding.IsHomeTenant(tenantId);
-                var isOrganizer = !string.IsNullOrEmpty(organizerEmail) && !string.IsNullOrEmpty(currentUserEmail) && organizerEmail == currentUserEmail;
-                var mode = (isFortressTenant && isOrganizer) ? "A" : "B";
+                // WI #9680: always Mode B (the Notetaker joins). Mode A is mothballed (Firm:EnableModeA=false) and
+                // MeetingsApiController always dispatches the bot, so a home-tenant organizer is no longer marked "A".
+                const string mode = "B";
 
                 result.Add(new CalendarMeetingDto
                 {
@@ -183,9 +181,7 @@ public class CalendarService
                     Mode = mode,
                     OrganizerEmail = organizerEmail,
                     TenantId = tenantId ?? "",
-                    ModeText = mode == "A"
-                        ? $"Mode A — {_branding.ModuleName} captures transcript directly"
-                        : $"Mode B — {_branding.NotetakerName} will join to record"
+                    ModeText = $"Mode B — {_branding.NotetakerName} will join to record"
                 });
             }
 

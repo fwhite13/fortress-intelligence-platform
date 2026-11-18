@@ -188,9 +188,9 @@ public class GraphProxyController : ControllerBase
                 _logger.LogDebug("FIRM Mode check: userEmail={UserEmail} organizerEmail={OrganizerEmail} isOrganizer={IsOrganizer}",
                     userEmail, e.OrganizerEmail, isOrganizer);
                 var modeHint = isOrganizer ? "A" : "B";
-                var modeText = isOrganizer
-                    ? "You're the host — FIRM captures natively, no bot joins."
-                    : $"{_branding.NotetakerName} will join to record.";
+                // WI #9680: the Notetaker always joins (Mode A is mothballed), so no "captures natively" text.
+                // modeHint is left as is for API callers; nothing in this repo reads it.
+                var modeText = $"{_branding.NotetakerName} will join to record.";
                 return new
                 {
                     e.CalendarEventId,

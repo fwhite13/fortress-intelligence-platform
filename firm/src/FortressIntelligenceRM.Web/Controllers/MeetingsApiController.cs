@@ -606,7 +606,7 @@ public class MeetingsApiController : ControllerBase
                 var pushBody = new
                 {
                     to = pushToken,
-                    title = "FIRM — Recording Ready",
+                    title = $"{_branding.ModuleName} — Recording Ready", // WI #9680
                     body = $"Transcript and summary ready: {pushTitle}",
                     data = new { meetingId }
                 };
