@@ -8,6 +8,10 @@ namespace FortressIntelligenceRM.Web.Services;
 public interface IEmailService
 {
     Task SendMeetingSummaryAsync(string toEmail, string meetingTitle, byte[] pdfBytes);
+
+    /// <summary>WI #9644 — a short notification (plain + html alternatives, no attachment) from the same
+    /// sender as the recap email (Branding:SummaryEmailFrom).</summary>
+    Task SendNotificationAsync(string toEmail, string subject, string textBody, string htmlBody);
 }
 
 public class EmailService : IEmailService
@@ -70,6 +74,33 @@ public class EmailService : IEmailService
         };
 
         _logger.LogInformation("FIRM: EmailService sending meeting summary email to {ToEmail} for meeting '{MeetingTitle}'", toEmail, meetingTitle);
+        await _ses.SendEmailAsync(request);
+    }
+
+    /// <summary>
+    /// WI #9644 — SES "Simple" content with both Text and Html bodies, which SES sends as a
+    /// multipart/alternative message (UTF-8, headers encoded by SES). Same SES client and FromAddress as
+    /// SendMeetingSummaryAsync. Never logs the recipient, subject or body; callers log the outcome.
+    /// </summary>
+    public async Task SendNotificationAsync(string toEmail, string subject, string textBody, string htmlBody)
+    {
+        var request = new SendEmailRequest
+        {
+            FromEmailAddress = FromAddress,
+            Destination = new Destination { ToAddresses = new List<string> { toEmail } },
+            Content = new EmailContent
+            {
+                Simple = new Message
+                {
+                    Subject = new Content { Data = subject, Charset = "UTF-8" },
+                    Body = new Body
+                    {
+                        Text = new Content { Data = textBody, Charset = "UTF-8" },
+                        Html = new Content { Data = htmlBody, Charset = "UTF-8" }
+                    }
+                }
+            }
+        };
         await _ses.SendEmailAsync(request);
     }
 

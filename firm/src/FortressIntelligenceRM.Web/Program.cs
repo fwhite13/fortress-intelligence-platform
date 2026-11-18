@@ -143,6 +143,8 @@ builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 builder.Services.AddAWSService<IAmazonSimpleEmailServiceV2>();
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+// WI #9644 — owner-only problem emails (singleton: sends fire-and-forget with its own scope per send).
+builder.Services.AddSingleton<MeetingAlertService>();
 
 // Controllers for API endpoints
 builder.Services.AddControllers();
@@ -215,6 +217,7 @@ builder.Services.AddHostedService<StuckMeetingRecoveryService>();
 // WI #9132: fails meetings stuck in Transcribing/Summarizing (all sources) after
 // Firm:StaleTranscribingHours (default 4, read by the service; values below 1 are clamped to 1).
 builder.Services.AddHostedService<StaleMeetingWatchdogService>();
+builder.Services.AddHostedService<MeetingAdmissionWatchService>(); // WI #9644 — 3-minute "not admitted" owner warning
 // WI #9135: Plaud auto-sync poller. Always registered; returns at once unless Firm:Plaud:Enabled (spec §5.2).
 builder.Services.AddHostedService<FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncBackgroundService>();
 builder.Services.AddSingleton<TeamsGraphService>();
