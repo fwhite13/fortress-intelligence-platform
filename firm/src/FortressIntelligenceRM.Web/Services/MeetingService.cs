@@ -1080,6 +1080,10 @@ public class MeetingService
             if (dbMeeting != null)
             {
                 dbMeeting.Status = MeetingStatus.Transcribing;
+                // WI #9682: restart the stale-transcription clock. updated_at has no ON UPDATE, so without
+                // this an older meeting looks "Transcribing for weeks" and StaleMeetingWatchdogService
+                // fails it on its next cycle while the new Batch job is still queued or running.
+                dbMeeting.UpdatedAt = DateTime.UtcNow;
                 dbMeeting.FailureAlertSentAt = null; // WI #9644 — a retried transcription that fails again alerts again
                 await db.SaveChangesAsync();
             }
