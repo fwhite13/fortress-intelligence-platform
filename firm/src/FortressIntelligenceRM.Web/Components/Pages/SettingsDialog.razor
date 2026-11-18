@@ -25,6 +25,9 @@
                                Color="Color.Warning" Class="mb-2" />
                     <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
                                Color="Color.Warning" Class="mb-2" />
+                    @* WI #9644 — owner-only emails: Notetaker not admitted 3 min after start, and any meeting failure *@
+                    <MudSwitch @bind-Value="_notifyMeetingProblems" Label="Email me when the Notetaker can't join or a meeting fails"
+                               Color="Color.Warning" Class="mb-2" />
                     @* WI #8310 — disabled until the Calendars.ReadWrite incremental consent flow ships *@
                     <MudStack Row AlignItems="AlignItems.Center" Spacing="2">
                         <MudSwitch @bind-Value="_autoCreateSuggestedEvents" Label="Auto-Create Suggested Events"
@@ -202,6 +205,7 @@
     private bool _loading = true;
     private bool _autoAddCalendarMeetings;
     private bool _autoEmailSummary;
+    private bool _notifyMeetingProblems = true; // WI #9644
     private bool _autoCreateSuggestedEvents;
     private string _entraOid = "";
     private string _displayName = "";
@@ -237,6 +241,7 @@
         {
             _autoAddCalendarMeetings = user.AutoAddCalendarMeetings;
             _autoEmailSummary = user.AutoEmailSummary;
+            _notifyMeetingProblems = user.NotifyMeetingProblems;
             _autoCreateSuggestedEvents = user.AutoCreateSuggestedEvents;
             _entraOid = user.EntraOid;
             _displayName = user.DisplayName;
@@ -268,7 +273,7 @@
 
     private async Task Save()
     {
-        await MeetingService.UpdateUserPreferencesAsync(UserId, _autoAddCalendarMeetings, _autoEmailSummary, _autoCreateSuggestedEvents);
+        await MeetingService.UpdateUserPreferencesAsync(UserId, _autoAddCalendarMeetings, _autoEmailSummary, _autoCreateSuggestedEvents, _notifyMeetingProblems);
         Snackbar.Add("Settings saved.", Severity.Success);
         MudDialog.Close(DialogResult.Ok(true));
     }

@@ -916,7 +916,8 @@ public class MeetingService
         return await db.Users.FindAsync(userId);
     }
 
-    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary, bool autoCreateSuggestedEvents)
+    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary, bool autoCreateSuggestedEvents,
+        bool? notifyMeetingProblems = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var user = await db.Users.FindAsync(userId);
@@ -925,6 +926,7 @@ public class MeetingService
         user.AutoAddCalendarMeetings = autoAddCalendarMeetings;
         user.AutoEmailSummary = autoEmailSummary;
         user.AutoCreateSuggestedEvents = autoCreateSuggestedEvents;
+        if (notifyMeetingProblems is bool notify) user.NotifyMeetingProblems = notify; // WI #9644
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
