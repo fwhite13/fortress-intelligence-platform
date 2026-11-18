@@ -404,6 +404,11 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_external_id (created_by, external_id)",
                 // WI #9134 — D17/P3 ledger flag for the best-effort Plaud transcript/note archive (ok|partial|failed).
                 "ALTER TABLE firm_plaud_imports ADD COLUMN plaud_archive_status VARCHAR(16) NULL",
+                // WI #9644 — owner-only problem emails: per-user toggle (default on, so existing users are on)
+                // and per-row dedupe stamps for the admission warning and the failure alert.
+                "ALTER TABLE firm_users ADD COLUMN notify_meeting_problems TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE firm_meetings ADD COLUMN admission_warning_sent_at DATETIME NULL",
+                "ALTER TABLE firm_meetings ADD COLUMN failure_alert_sent_at DATETIME NULL",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
                 "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",

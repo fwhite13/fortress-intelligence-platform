@@ -214,13 +214,14 @@ public class PlaudSyncService
     private readonly PlaudMcpClient _mcp;
     private readonly MeetingIngestService _ingest;
     private readonly MeetingService _meetingService;
+    private readonly MeetingAlertService _alerts; // WI #9644
     private readonly S3Service _s3;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly PlaudOptions _options;
     private readonly ILogger<PlaudSyncService> _logger;
 
     public PlaudSyncService(IDbContextFactory<FirmDbContext> dbFactory, IPlaudOAuthService oauth, PlaudMcpClient mcp,
-        MeetingIngestService ingest, MeetingService meetingService, S3Service s3, IHttpClientFactory httpClientFactory,
+        MeetingIngestService ingest, MeetingService meetingService, MeetingAlertService alerts, S3Service s3, IHttpClientFactory httpClientFactory,
         IOptions<PlaudOptions> options, ILogger<PlaudSyncService> logger)
     {
         _dbFactory = dbFactory;
@@ -228,6 +229,7 @@ public class PlaudSyncService
         _mcp = mcp;
         _ingest = ingest;
         _meetingService = meetingService;
+        _alerts = alerts;
         _s3 = s3;
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
@@ -571,6 +573,7 @@ public class PlaudSyncService
             .OrderBy(r => r.RecordedAt ?? r.FirstSeenAt)
             .ToListAsync(ct);
         var ok = 0;
+        var failedMeetingIds = new List<long>(); // WI #9644
         foreach (var row in due)
         {
             var meetingId = row.MeetingId!.Value;
@@ -599,6 +602,7 @@ public class PlaudSyncService
                         meeting.LastFailureReason = "transcription_submit_failed";
                         meeting.ErrorMessage = "Transcription could not be started";
                         meeting.UpdatedAt = DateTime.UtcNow;
+                        failedMeetingIds.Add(meeting.Id);
                     }
                 }
                 else
@@ -612,6 +616,8 @@ public class PlaudSyncService
         }
         if (due.Count > 0)
             await db.SaveChangesAsync(CancellationToken.None);
+        // WI #9644 — the meeting recording itself failed (not just a ledger row): owner failure alert after the save.
+        _alerts.NotifyFailures(failedMeetingIds);
         return ok;
     }
 

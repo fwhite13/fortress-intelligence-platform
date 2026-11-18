@@ -14,8 +14,9 @@ public class MeetingService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IBatchTranscriptionService _batchService;
     private readonly AutoJoinSchedulerService _autoJoinScheduler;
+    private readonly MeetingAlertService _alerts; // WI #9644
 
-    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService, AutoJoinSchedulerService autoJoinScheduler)
+    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService, AutoJoinSchedulerService autoJoinScheduler, MeetingAlertService alerts)
     {
         _dbFactory = dbFactory;
         _config = config;
@@ -23,6 +24,7 @@ public class MeetingService
         _httpClientFactory = httpClientFactory;
         _batchService = batchService;
         _autoJoinScheduler = autoJoinScheduler;
+        _alerts = alerts;
     }
 
     public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
@@ -314,6 +316,7 @@ public class MeetingService
             }
             _logger.LogInformation("FIRM: Meeting {Id} status transition (conditional): {OldStatus} → {NewStatus}",
                 id, meeting.Status, status);
+            _alerts.NotifyFailure(id); // WI #9644 — owner failure alert (fire-and-forget, deduped per run)
             if (meeting.IsPrimaryRecorder)
             {
                 try { await PromoteOrFailSubscribersAsync(meeting.Id); }
@@ -331,6 +334,9 @@ public class MeetingService
         meeting.UpdatedAt = DateTime.UtcNow;
         if (errorMessage != null) meeting.ErrorMessage = errorMessage;
         if (lastFailureReason != null) meeting.LastFailureReason = lastFailureReason;
+        // WI #9644: the row is starting a new run, so a later failure of that run alerts again.
+        if (status is MeetingStatus.Scheduled or MeetingStatus.Pending or MeetingStatus.Joining)
+            meeting.FailureAlertSentAt = null;
         if (status == MeetingStatus.Recording)
         {
             // Bot successfully joined — any previously recorded failure (e.g. lobby_timeout) no longer applies.
@@ -352,6 +358,8 @@ public class MeetingService
             meeting.EndedAt ??= DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
+        if (status == MeetingStatus.Failed)
+            _alerts.NotifyFailure(id); // WI #9644 — owner failure alert (fire-and-forget, deduped per run)
 
         // WI #7035: only ever fires for a primary transitioning to Complete/Failed. Subscribers
         // (IsPrimaryRecorder=false) never trigger this, so fan-out cannot re-trigger itself —
@@ -505,6 +513,8 @@ public class MeetingService
             }
             await db.SaveChangesAsync();
             _logger.LogInformation("FIRM: Primary {Id} failed past join window — {Count} subscriber(s) set to Failed ({Reason})", primaryMeetingId, subscribers.Count, reason);
+            // WI #9644 — each subscriber row is its own owner's meeting; each owner hears about their own row only.
+            _alerts.NotifyFailures(subscribers.Select(s => s.Id));
             return;
         }
 
@@ -532,6 +542,7 @@ public class MeetingService
             candidate.PrimaryMeetingId = null;
             candidate.NormalizedMeetingUrl = normalizedUrl;
             candidate.Status = MeetingStatus.Scheduled;
+            candidate.FailureAlertSentAt = null; // WI #9644 — new run for this row
             candidate.UpdatedAt = now;
 
             foreach (var other in subscribers.Where(m => m.Id != candidate.Id))
@@ -596,6 +607,7 @@ public class MeetingService
 
         _logger.LogWarning("FIRM: T+10 cascade — {Count} subscriber(s) set to Failed ({Reason}): {Ids}",
             stranded.Count, NoPrimaryJoinedReason, string.Join(",", stranded.Select(m => m.Id)));
+        _alerts.NotifyFailures(stranded.Select(m => m.Id)); // WI #9644
         return stranded.Count;
     }
 
@@ -690,6 +702,8 @@ public class MeetingService
             original.NormalizedMeetingUrl = null;
             if (original.Status == MeetingStatus.Scheduled)
                 original.Status = MeetingStatus.Failed; // reverted-after-failure row: record the failed run
+                // WI #9644: no owner alert here on purpose. This superseded row is being replaced by the clone because
+                // the owner just clicked Join Now; its failure was already alerted when that run failed.
             original.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
@@ -902,7 +916,8 @@ public class MeetingService
         return await db.Users.FindAsync(userId);
     }
 
-    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary, bool autoCreateSuggestedEvents)
+    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary, bool autoCreateSuggestedEvents,
+        bool? notifyMeetingProblems = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var user = await db.Users.FindAsync(userId);
@@ -911,6 +926,7 @@ public class MeetingService
         user.AutoAddCalendarMeetings = autoAddCalendarMeetings;
         user.AutoEmailSummary = autoEmailSummary;
         user.AutoCreateSuggestedEvents = autoCreateSuggestedEvents;
+        if (notifyMeetingProblems is bool notify) user.NotifyMeetingProblems = notify; // WI #9644
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
@@ -1008,6 +1024,7 @@ public class MeetingService
             if (dbMeeting != null)
             {
                 dbMeeting.Status = MeetingStatus.Transcribing;
+                dbMeeting.FailureAlertSentAt = null; // WI #9644 — a retried transcription that fails again alerts again
                 await db.SaveChangesAsync();
             }
 

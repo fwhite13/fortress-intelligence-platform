@@ -46,14 +46,16 @@ public class MeetingIngestService
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly S3Service _s3Service;
     private readonly MeetingService _meetingService;
+    private readonly MeetingAlertService _alerts; // WI #9644
     private readonly ILogger<MeetingIngestService> _logger;
 
     public MeetingIngestService(IDbContextFactory<FirmDbContext> dbFactory, S3Service s3Service,
-        MeetingService meetingService, ILogger<MeetingIngestService> logger)
+        MeetingService meetingService, MeetingAlertService alerts, ILogger<MeetingIngestService> logger)
     {
         _dbFactory = dbFactory;
         _s3Service = s3Service;
         _meetingService = meetingService;
+        _alerts = alerts;
         _logger = logger;
     }
 
@@ -63,6 +65,18 @@ public class MeetingIngestService
     /// transcription job. A duplicate (CreatedBy, ExternalId) returns the existing meeting untouched.
     /// Throws <see cref="MeetingIngestStorageException"/> if the audio upload fails (row marked Failed).
     /// </summary>
+    /// <summary>
+    /// WI #9644 — owner failure alert for an ingest storage failure. Not for Plaud: PlaudSyncService deletes the
+    /// audio-less row at once and retries the import from its ledger, so that is an import-ledger failure, not a
+    /// failed meeting recording (a Plaud recording that finally fails goes through RetrySubmitFailedAsync).
+    /// </summary>
+    private void NotifyIngestFailure(IngestRequest request, long meetingId)
+    {
+        if (string.Equals(request.Source, FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.Source, StringComparison.OrdinalIgnoreCase))
+            return;
+        _alerts.NotifyFailure(meetingId, MeetingAlertService.IngestFailedReason);
+    }
+
     public async Task<IngestResult> IngestRecordingAsync(IngestRequest request, Stream audio, long length, string contentType,
         CancellationToken cancellationToken = default)
     {
@@ -133,6 +147,7 @@ public class MeetingIngestService
             meeting.ErrorMessage = "Audio upload to storage failed";
             meeting.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
+            NotifyIngestFailure(request, meeting.Id);
             throw new MeetingIngestStorageException(meeting.Id, ex);
         }
 
@@ -234,6 +249,7 @@ public class MeetingIngestService
             meeting.ErrorMessage = "Audio upload to storage failed";
             meeting.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
+            NotifyIngestFailure(request, meeting.Id);
             throw new MeetingIngestStorageException(meeting.Id, ex);
         }
 
