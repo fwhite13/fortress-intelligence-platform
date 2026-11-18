@@ -1,4 +1,5 @@
 @inject FortressIntelligenceRM.Web.Services.BrandingConfig Branding
+@inject IConfiguration Configuration
 
 <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-1 mb-1">Overview</MudText>
 <MudText Typo="Typo.body2">
@@ -51,7 +52,8 @@
     <strong>Audio</strong> — downloads the original meeting recording if one was captured.
 </MudText>
 
-@if (Branding.SuiteName != "RISE")
+@* WI #9743: also hidden when the FAIT KB switch (Firm:FaitKbEnabled) is off. *@
+@if (Branding.SuiteName != "RISE" && FaitKb.IsEnabled(Configuration))
 {
     <MudDivider Class="my-2" />
 

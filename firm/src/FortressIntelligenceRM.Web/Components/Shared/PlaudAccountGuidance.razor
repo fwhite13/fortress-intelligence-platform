@@ -1,11 +1,13 @@
 @* WI #9133 — what connecting Plaud does (spec §6.1, D1: short and factual). WI #9680: OrgModuleName is
-   "Fortress FIRM" for FIRM and "Refuge Notetaker" for RN (BrandingConfig). *@
+   "Fortress FIRM" for FIRM and "Refuge Notetaker" for RN (BrandingConfig). WI #9743: the knowledge-base clause
+   only when the FAIT KB switch (Firm:FaitKbEnabled) is on. *@
 @inject BrandingConfig Branding
+@inject IConfiguration Configuration
 
 <MudStack Spacing="1">
     <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
         Connect your own Plaud account. @Branding.OrgModuleName downloads the audio of your Plaud recordings and
-        processes it like your other meetings: transcript, speaker names, summary, and your knowledge-base settings.
+        processes it like your other meetings: transcript, speaker names, summary@(FaitKb.IsEnabled(Configuration) ? ", and your knowledge-base settings" : "").
     </MudText>
     <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
         @Branding.ModuleName never changes anything in Plaud. Recordings must be synced to the Plaud cloud.
