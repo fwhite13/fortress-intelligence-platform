@@ -463,31 +463,20 @@
             // confirmed gone by every reconciliation anchor (ID, iCalUId, normalized URL) AND is
             // still upcoming. Past meetings simply fall outside the 7-day-forward Graph window —
             // that's not removal, so they're excluded entirely (guarded by StartDatetime check).
-            var currentIds = _upcomingMeetings
-                .Where(c => !string.IsNullOrEmpty(c.CalendarEventId))
-                .Select(c => c.CalendarEventId)
-                .ToHashSet();
-            var currentICalUIds = _upcomingMeetings
-                .Where(c => !string.IsNullOrEmpty(c.ICalUId))
-                .Select(c => c.ICalUId)
-                .ToHashSet();
-            var currentNormalizedUrls = _upcomingMeetings
-                .Where(c => !string.IsNullOrEmpty(c.JoinUrl))
-                .Select(c => CalendarService.NormalizeMeetingUrl(c.JoinUrl))
-                .ToHashSet();
+            // WI #9678: the anchor rule is CalendarService.IsGoneFromCalendar, shared with
+            // CalendarAutoSyncService's server-side cleanup so the chip and the cleanup agree.
+            var currentAnchors = CalendarAnchors.From(
+                _upcomingMeetings.Select(c => ((string?)c.CalendarEventId, (string?)c.ICalUId, (string?)c.JoinUrl)));
 
             _calendarRemovedMeetingIds = _meetings
                 .Where(m =>
                     m.Status == MeetingStatus.Scheduled
-                    && !string.IsNullOrEmpty(m.CalendarEventId)
                     // Only check meetings whose start time is still upcoming (within the Graph
                     // window) — past meetings fall out of the window naturally, not "removed".
                     && m.StartDatetime.HasValue
                     && m.StartDatetime.Value > DateTime.UtcNow
-                    // Confirmed gone: not found by ID, iCalUId, OR normalized URL.
-                    && !currentIds.Contains(m.CalendarEventId!)
-                    && (string.IsNullOrEmpty(m.GraphMeetingId) || !currentICalUIds.Contains(m.GraphMeetingId!))
-                    && !currentNormalizedUrls.Contains(CalendarService.NormalizeMeetingUrl(m.MeetingUrl)))
+                    // Confirmed gone: has a CalendarEventId and is not found by ID, iCalUId, OR normalized URL.
+                    && CalendarService.IsGoneFromCalendar(m, currentAnchors))
                 .Select(m => m.Id)
                 .ToHashSet();
 
