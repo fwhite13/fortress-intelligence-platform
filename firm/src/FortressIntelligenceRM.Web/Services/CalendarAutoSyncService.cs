@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Models;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,22 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     // WI #8863: how far apart a row's start and a calendar occurrence's start may be and still be
     // matched on iCalUId (which recurring-series occurrences can share).
     private static readonly TimeSpan IcalUidMatchTolerance = TimeSpan.FromHours(2);
+
+    // WI #9678: calendar reconcile (remove auto-added rows whose calendar event is gone).
+    /// <summary>Consecutive Complete polls a row must be missing on before it is removed.</summary>
+    internal const int ReconcileMissesRequired = 2;
+    /// <summary>Rows starting sooner than this are never judged (the bot may be about to launch).</summary>
+    internal static readonly TimeSpan ReconcileMinLeadTime = TimeSpan.FromMinutes(15);
+    /// <summary>Rows starting within this of the polled window's end are never judged (edge of window).</summary>
+    internal static readonly TimeSpan ReconcileWindowEdgeMargin = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// WI #9678 debounce: meeting id → (owner, consecutive Complete polls the row was missing on).
+    /// In memory only: a restart resets every count, which only delays a removal (the safe
+    /// direction). Cleared for a row when it is seen again or stops being a candidate; incomplete
+    /// polls neither add nor clear.
+    /// </summary>
+    private readonly ConcurrentDictionary<long, (Guid UserId, int Misses)> _reconcileMisses = new();
 
     // WI #8863: rows the calendar must never re-anchor or reschedule onto another occurrence.
     private static bool IsTerminal(FirmMeeting m) =>
@@ -104,6 +121,24 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
             .Where(u => u.AutoAddCalendarMeetings && u.IsActive)
             .ToListAsync(ct);
 
+        // WI #9678: kill switch, read every poll. Off also forgets the debounce counts, so turning it
+        // back on starts every row from zero misses.
+        var reconcileEnabled = _config.GetValue<bool>("Firm:CalendarReconcileEnabled", true);
+        if (!reconcileEnabled)
+        {
+            _reconcileMisses.Clear();
+        }
+        else
+        {
+            // Forget counts for users who are no longer polled (auto-add turned off, deactivated).
+            var polledUserIds = users.Select(u => u.Id).ToHashSet();
+            foreach (var entry in _reconcileMisses)
+            {
+                if (!polledUserIds.Contains(entry.Value.UserId))
+                    _reconcileMisses.TryRemove(entry.Key, out _);
+            }
+        }
+
         if (users.Count == 0) return;
 
         _logger.LogInformation("[AutoSync] Polling calendars for {Count} opted-in users.", users.Count);
@@ -112,7 +147,10 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         {
             try
             {
-                var meetings = await _calendarService.GetUpcomingCalendarMeetingsAsync(user.EntraOid, user.Email, ct);
+                // WI #9678: one paged Graph read per user. The insert/reconcile loop below uses its
+                // Meetings list exactly as before; Complete gates the removal step only.
+                var poll = await _calendarService.GetUpcomingCalendarMeetingsPollAsync(user.EntraOid, user.Email, ct);
+                var meetings = poll.Meetings;
 
                 foreach (var dto in meetings)
                 {
@@ -314,12 +352,190 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                             meeting.Id, startDatetime, user.Id, dto.CalendarEventId);
                     }
                 }
+
+                // WI #9678: after the insert/reconcile loop, remove this user's auto-added rows whose
+                // calendar event is gone. Has its own try/catch: it can never break the poll.
+                if (reconcileEnabled)
+                    await ReconcileRemovedCalendarEventsAsync(user.Id, poll, ct);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "[AutoSync] Failed to sync calendar for user {UserId}", user.Id);
             }
         }
+    }
+
+    /// <summary>
+    /// WI #9678: removes the user's auto-added meetings whose calendar event has been deleted or
+    /// declined, together with their EventBridge auto-join schedule, so the bot never launches into
+    /// a cancelled meeting. Acts only on a Complete poll (an empty or truncated read proves nothing)
+    /// and only after the row was missing on <see cref="ReconcileMissesRequired"/> consecutive
+    /// Complete polls. The decision itself is <see cref="PlanCalendarRemovals"/> (pure); this method
+    /// only loads rows, applies the debounce counts and performs the removals. Any failure is logged
+    /// (exception type only) and swallowed so the poll carries on with the next user.
+    /// </summary>
+    private async Task ReconcileRemovedCalendarEventsAsync(Guid userId, CalendarPollResult poll, CancellationToken ct)
+    {
+        try
+        {
+            if (!poll.Complete)
+            {
+                _logger.LogInformation("[AutoSync] Calendar reconcile skipped for user {UserId}: calendar read was not complete", userId);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var earliestStart = now + ReconcileMinLeadTime;
+            var latestStart = poll.WindowEndUtc - ReconcileWindowEdgeMargin;
+
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            // SQL pre-filter only; PlanCalendarRemovals re-applies every condition in memory.
+            var rows = await db.Meetings.AsNoTracking()
+                .Where(m => m.CreatedBy == userId
+                         && m.Source == "autoadd"
+                         && m.CalendarEventId != null && m.CalendarEventId != ""
+                         && (m.Status == MeetingStatus.Scheduled || m.Status == MeetingStatus.Waiting)
+                         && m.StartedAt == null
+                         && m.StartDatetime != null
+                         && m.StartDatetime > earliestStart
+                         && m.StartDatetime < latestStart)
+                .ToListAsync(ct);
+
+            var primaryIds = rows.Where(m => m.IsPrimaryRecorder).Select(m => m.Id).ToList();
+            var primariesWithSubscribers = primaryIds.Count == 0
+                ? new HashSet<long>()
+                : (await db.Meetings.AsNoTracking()
+                    .Where(s => s.PrimaryMeetingId != null && primaryIds.Contains(s.PrimaryMeetingId.Value))
+                    .Select(s => s.PrimaryMeetingId!.Value)
+                    .Distinct()
+                    .ToListAsync(ct)).ToHashSet();
+
+            var priorMisses = _reconcileMisses
+                .Where(kv => kv.Value.UserId == userId)
+                .ToDictionary(kv => kv.Key, kv => kv.Value.Misses);
+
+            var plan = PlanCalendarRemovals(userId, rows, primariesWithSubscribers,
+                CalendarAnchors.From(poll.Meetings), priorMisses, now, poll.WindowEndUtc);
+
+            // Apply the debounce: rows seen again (or no longer candidates) lose their count.
+            foreach (var id in priorMisses.Keys)
+            {
+                if (!plan.MissCounts.ContainsKey(id))
+                    _reconcileMisses.TryRemove(id, out _);
+            }
+            foreach (var (id, misses) in plan.MissCounts)
+                _reconcileMisses[id] = (userId, misses);
+
+            foreach (var id in plan.SkippedPrimaries)
+            {
+                _logger.LogInformation(
+                    "[AutoSync] Not removing meeting {Id} for user {UserId}: calendar event no longer present, but it is the primary recorder for other users' subscriber meetings",
+                    id, userId);
+            }
+
+            foreach (var id in plan.ToRemove)
+            {
+                try
+                {
+                    // Same path as the manual Remove button: RemoveMeetingAsync (refuses in-progress
+                    // statuses), then the EventBridge schedule.
+                    var (removed, error) = await _meetingService.RemoveMeetingAsync(id, userId);
+                    if (!removed)
+                    {
+                        _logger.LogWarning(
+                            "[AutoSync] Calendar reconcile did not remove meeting {Id} for user {UserId}: {Error}",
+                            id, userId, error);
+                        continue;
+                    }
+                    _reconcileMisses.TryRemove(id, out _);
+                    await _autoJoinScheduler.DeleteScheduleAsync(id);
+                    _logger.LogInformation(
+                        "[AutoSync] Removed meeting {Id} (calendar event no longer present, seen missing on {Misses} polls) for user {UserId}",
+                        id, ReconcileMissesRequired, userId);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(
+                        "[AutoSync] Calendar reconcile failed to remove meeting {Id} for user {UserId} ({ExceptionType})",
+                        id, userId, ex.GetType().Name);
+                }
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[AutoSync] Calendar reconcile failed for user {UserId} ({ExceptionType}) — poll continues",
+                userId, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>WI #9678: the outcome of one user's reconcile decision.</summary>
+    /// <param name="MissCounts">New consecutive-miss count for every candidate row that is gone on this
+    /// poll. Rows absent from this map have their count cleared.</param>
+    /// <param name="ToRemove">Rows to delete now (missing on enough consecutive Complete polls).</param>
+    /// <param name="SkippedPrimaries">Rows that qualify but are primaries with subscribers — never auto-removed.</param>
+    internal sealed record CalendarRemovalPlan(
+        IReadOnlyDictionary<long, int> MissCounts,
+        IReadOnlyList<long> ToRemove,
+        IReadOnlyList<long> SkippedPrimaries);
+
+    /// <summary>
+    /// WI #9678: may this row be judged by the calendar reconcile at all? Only the user's own
+    /// auto-added rows (never manual Join Now rows or any other source) that carry a Graph event id,
+    /// are still waiting to run (Scheduled or Waiting, never started, no bot run recorded), and start
+    /// more than <see cref="ReconcileMinLeadTime"/> from now and at least
+    /// <see cref="ReconcileWindowEdgeMargin"/> before the end of the polled window.
+    /// </summary>
+    internal static bool IsReconcileCandidate(FirmMeeting m, Guid userId, DateTime nowUtc, DateTime windowEndUtc) =>
+        m.CreatedBy == userId
+        && m.Source == "autoadd"
+        && !string.IsNullOrEmpty(m.CalendarEventId)
+        && m.Status is MeetingStatus.Scheduled or MeetingStatus.Waiting
+        && m.StartedAt == null
+        && string.IsNullOrEmpty(m.BotTaskArn)
+        && string.IsNullOrEmpty(m.LastFailureReason)
+        && m.StartDatetime is DateTime start
+        && start > nowUtc + ReconcileMinLeadTime
+        && start < windowEndUtc - ReconcileWindowEdgeMargin;
+
+    /// <summary>
+    /// WI #9678: pure decision over (rows, current calendar anchors, prior miss counts, now). The
+    /// caller must only call it for a Complete poll. A candidate row that is gone by all three
+    /// anchors (<see cref="CalendarService.IsGoneFromCalendar"/>, the same rule as the Meetings page
+    /// chip) gets its miss count incremented; at <see cref="ReconcileMissesRequired"/> it is removed,
+    /// unless it is a primary that other rows point to.
+    /// </summary>
+    internal static CalendarRemovalPlan PlanCalendarRemovals(
+        Guid userId,
+        IEnumerable<FirmMeeting> rows,
+        IReadOnlySet<long> primariesWithSubscribers,
+        CalendarAnchors current,
+        IReadOnlyDictionary<long, int> priorMisses,
+        DateTime nowUtc,
+        DateTime windowEndUtc)
+    {
+        var missCounts = new Dictionary<long, int>();
+        var toRemove = new List<long>();
+        var skippedPrimaries = new List<long>();
+
+        foreach (var m in rows)
+        {
+            if (!IsReconcileCandidate(m, userId, nowUtc, windowEndUtc)) continue;
+            if (!CalendarService.IsGoneFromCalendar(m, current)) continue;
+
+            var misses = (priorMisses.TryGetValue(m.Id, out var prior) ? prior : 0) + 1;
+            missCounts[m.Id] = misses;
+            if (misses < ReconcileMissesRequired) continue;
+
+            if (m.IsPrimaryRecorder && primariesWithSubscribers.Contains(m.Id))
+            {
+                skippedPrimaries.Add(m.Id);
+                continue;
+            }
+            toRemove.Add(m.Id);
+        }
+
+        return new CalendarRemovalPlan(missCounts, toRemove, skippedPrimaries);
     }
 
     /// <summary>
