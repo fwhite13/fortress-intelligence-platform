@@ -15,8 +15,9 @@ public class MeetingService
     private readonly IBatchTranscriptionService _batchService;
     private readonly AutoJoinSchedulerService _autoJoinScheduler;
     private readonly MeetingAlertService _alerts; // WI #9644
+    private readonly S3Service _s3; // WI #9679 — delete a removed meeting's stored artifacts
 
-    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService, AutoJoinSchedulerService autoJoinScheduler, MeetingAlertService alerts)
+    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService, AutoJoinSchedulerService autoJoinScheduler, MeetingAlertService alerts, S3Service s3)
     {
         _dbFactory = dbFactory;
         _config = config;
@@ -25,6 +26,7 @@ public class MeetingService
         _batchService = batchService;
         _autoJoinScheduler = autoJoinScheduler;
         _alerts = alerts;
+        _s3 = s3;
     }
 
     public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
@@ -865,8 +867,62 @@ public class MeetingService
         await db.Database.ExecuteSqlRawAsync(
             "UPDATE firm_plaud_imports SET status = 'deleted_by_user', deleted_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() " +
             "WHERE meeting_id = {0} AND user_id = {1}", id, userId.ToString());
+        // WI #9679 — decide BEFORE the row delete whether this meeting's stored artifacts may go. A primary that
+        // still has subscriber rows keeps them: the subscribers render the primary's transcript/summary
+        // (artifactMeetingId in GetMeetingAsync / ResummarizeService). fk_fm_primary_meeting has no ON DELETE
+        // clause (InnoDB default RESTRICT, DatabaseInitializationService), so in a database where the FK exists the
+        // row delete below throws first and nothing is touched; the check covers a database without the FK.
+        var hasSubscribers = await db.Meetings.AnyAsync(s => s.PrimaryMeetingId == id);
         await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
+
+        // Row first, objects second: S3 never makes the user's removal fail.
+        if (hasSubscribers)
+            _logger.LogInformation("FIRM: meeting {MeetingId} removed; S3 artifacts kept because subscriber rows still use them", id);
+        else
+            await DeleteMeetingArtifactsAsync(id);
         return (true, null);
+    }
+
+    /// <summary>
+    /// WI #9679 — the per-meeting S3 prefixes FIRM, the vpbot and the transcriber write to, for ONE meeting id.
+    /// Pure. Every prefix ends with "/{id}/", so meeting 24 can never match 240. Shared prefixes (voiceprints/,
+    /// voice-samples/, auth/, firm-uploads/, kb-docs/) are deliberately absent.
+    ///   firm-audio/{id}/        recording.wav (vpbot), {source}{ext} (ingest), active_speaker.json, plaud-transcript.json, plaud-note.md
+    ///   firm-transcripts/{id}/  transcript.json, summary.json, summary.md, speaker_corrections.json (transcriber, BatchTranscriptionService)
+    ///   firm-mindmaps/{id}/     mindmap.json (MindmapService)
+    ///   debug/screenshots/{id}/ vpbot teams.ts / teams-auth.ts
+    ///   debug-screenshots/{id}/ vpbot index.ts (older)
+    /// </summary>
+    public static IReadOnlyList<string> MeetingArtifactPrefixes(long meetingId)
+    {
+        if (meetingId <= 0) return Array.Empty<string>();
+        return new[]
+        {
+            $"firm-audio/{meetingId}/",
+            $"firm-transcripts/{meetingId}/",
+            $"firm-mindmaps/{meetingId}/",
+            $"debug/screenshots/{meetingId}/",
+            $"debug-screenshots/{meetingId}/",
+        };
+    }
+
+    /// <summary>WI #9679 — best-effort delete of this meeting's own S3 artifacts. Never throws. Logs the meeting id,
+    /// prefix and exception type only (no title, URL, email or key names).</summary>
+    private async Task DeleteMeetingArtifactsAsync(long meetingId)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        foreach (var prefix in MeetingArtifactPrefixes(meetingId))
+        {
+            try
+            {
+                await _s3.DeletePrefixAsync(prefix, cts.Token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("FIRM: meeting {MeetingId} removed but deleting S3 prefix {Prefix} failed ({ExceptionType}); objects stay until lifecycle expiry",
+                    meetingId, prefix, ex.GetType().Name);
+            }
+        }
     }
 
     /// <summary>Max length of firm_meetings.title (FirmDbContext: HasMaxLength(500)).</summary>

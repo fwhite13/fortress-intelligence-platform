@@ -247,6 +247,97 @@ public class S3Service
         await _s3.DeleteObjectAsync(Bucket, s3Key, cancellationToken);
     }
 
+    /// <summary>S3 DeleteObjects accepts at most 1000 keys per call.</summary>
+    public const int DeleteBatchSize = 1000;
+
+    /// <summary>Shared prefixes that must never be bulk-deleted (voiceprints, enrollment samples, bot auth state,
+    /// in-flight chunked uploads). DeletePrefixAsync refuses any prefix under these.</summary>
+    private static readonly string[] ProtectedPrefixes = { "voiceprints/", "voice-samples/", "auth/", "firm-uploads/" };
+
+    /// <summary>
+    /// WI #9679 — true when <paramref name="prefix"/> is safe for <see cref="DeletePrefixAsync"/>: not empty, ends
+    /// with '/', its last segment is a numeric (meeting) id, and it is not under a protected shared prefix. The
+    /// trailing '/' is what stops "firm-audio/24/" from matching "firm-audio/240/".
+    /// </summary>
+    public static bool IsValidMeetingPrefix(string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || !prefix.EndsWith('/') || prefix.StartsWith('/')) return false;
+        if (prefix.Contains("//")) return false;
+        foreach (var p in ProtectedPrefixes)
+            if (prefix.StartsWith(p, StringComparison.OrdinalIgnoreCase)) return false;
+        var segments = prefix.TrimEnd('/').Split('/');
+        if (segments.Length < 2) return false; // a bare "{id}/" has no artifact class in front of it
+        var idSegment = segments[^1];
+        return idSegment.Length > 0 && idSegment.All(char.IsAsciiDigit) && long.TryParse(idSegment, out var id) && id > 0;
+    }
+
+    /// <summary>
+    /// WI #9679 — deletes every object under <paramref name="prefix"/> (paged ListObjectsV2, then DeleteObjects in
+    /// batches of at most <see cref="DeleteBatchSize"/>). Refuses (ArgumentException) any prefix that fails
+    /// <see cref="IsValidMeetingPrefix"/>. Returns the number of keys deleted. Throws when a list or delete call
+    /// fails or S3 reports per-key delete errors; the caller decides whether that is fatal. Logs the prefix and
+    /// counts only, never the keys.
+    /// </summary>
+    public async Task<int> DeletePrefixAsync(string prefix, CancellationToken cancellationToken = default)
+    {
+        if (!IsValidMeetingPrefix(prefix))
+            throw new ArgumentException("Prefix must end with '/' and end in a numeric meeting id segment, and must not be a shared prefix.", nameof(prefix));
+
+        var deleted = 0;
+        var failed = 0;
+        string? firstErrorCode = null;
+        var batch = new List<KeyVersion>(DeleteBatchSize);
+
+        async Task FlushAsync()
+        {
+            if (batch.Count == 0) return;
+            var response = await _s3.DeleteObjectsAsync(new DeleteObjectsRequest
+            {
+                BucketName = Bucket,
+                Objects = batch.ToList(),
+                Quiet = true // only errors come back
+            }, cancellationToken);
+            var errors = response.DeleteErrors?.Count ?? 0;
+            if (errors > 0)
+            {
+                failed += errors;
+                firstErrorCode ??= response.DeleteErrors![0].Code;
+            }
+            deleted += batch.Count - errors;
+            batch.Clear();
+        }
+
+        string? continuationToken = null;
+        do
+        {
+            var page = await _s3.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = Bucket,
+                Prefix = prefix,
+                ContinuationToken = continuationToken,
+                MaxKeys = DeleteBatchSize
+            }, cancellationToken);
+
+            foreach (var obj in page.S3Objects ?? new List<S3Object>())
+            {
+                // Defence in depth: ListObjectsV2 with Prefix only returns keys under it.
+                if (!obj.Key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                batch.Add(new KeyVersion { Key = obj.Key });
+                if (batch.Count >= DeleteBatchSize) await FlushAsync();
+            }
+
+            continuationToken = page.IsTruncated == true ? page.NextContinuationToken : null;
+        } while (!string.IsNullOrEmpty(continuationToken));
+
+        await FlushAsync();
+
+        if (failed > 0)
+            throw new InvalidOperationException($"S3 DeleteObjects reported {failed} failed key(s) under the prefix (first error code: {firstErrorCode}); {deleted} deleted.");
+
+        _logger.LogInformation("FIRM: Deleted {Count} S3 object(s) under prefix {Prefix}", deleted, prefix);
+        return deleted;
+    }
+
     /// <summary>Reads a small JSON object with its ETag and last-modified time; null when it does not exist.</summary>
     public async Task<(string Json, string ETag, DateTime LastModifiedUtc)?> GetSmallObjectAsync(string s3Key,
         CancellationToken cancellationToken = default)
