@@ -259,6 +259,34 @@ var app = builder.Build();
 // Health endpoint
 app.MapGet("/health", (BrandingConfig b) => Results.Ok(new { status = "healthy", service = b.ModuleName.ToLower(), timestamp = DateTime.UtcNow })).AllowAnonymous();
 
+// WI #9680 — PWA manifest (linked from App.razor; WI #9139 made the app installable). Replaces the static
+// wwwroot/manifest.webmanifest so the installed app's name and description come from BrandingConfig
+// ("FIRM" on FIRM, "Refuge Notetaker" on RN). Every other field is the same as the old static file.
+// Anonymous like the static file was: browsers fetch the manifest without credentials.
+app.MapGet("/manifest.webmanifest", (BrandingConfig b) =>
+{
+    var manifest = new System.Text.Json.Nodes.JsonObject
+    {
+        ["name"] = b.ModuleName,
+        ["short_name"] = b.ModuleName,
+        ["description"] = $"Upload a recording to {b.ModuleName} for transcription and minutes.",
+        ["id"] = "/upload",
+        ["start_url"] = "/upload",
+        ["scope"] = "/",
+        ["display"] = "standalone",
+        ["orientation"] = "portrait",
+        ["theme_color"] = "#1a2332",
+        ["background_color"] = "#f8f9fa",
+        ["icons"] = new System.Text.Json.Nodes.JsonArray
+        {
+            new System.Text.Json.Nodes.JsonObject { ["src"] = "/icons/firm-192.png", ["sizes"] = "192x192", ["type"] = "image/png", ["purpose"] = "any" },
+            new System.Text.Json.Nodes.JsonObject { ["src"] = "/icons/firm-512.png", ["sizes"] = "512x512", ["type"] = "image/png", ["purpose"] = "any" },
+            new System.Text.Json.Nodes.JsonObject { ["src"] = "/icons/firm-512.png", ["sizes"] = "512x512", ["type"] = "image/png", ["purpose"] = "maskable" },
+        },
+    };
+    return Results.Text(manifest.ToJsonString(), "application/manifest+json; charset=utf-8");
+}).AllowAnonymous();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
