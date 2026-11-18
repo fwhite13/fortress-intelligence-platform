@@ -111,7 +111,6 @@ public class MeetingAlertService
 
     public sealed record AlertEmail(string Subject, string Text, string Html);
 
-    /// <summary>Plain-words reason for a failure, from the existing UI/controller messages.</summary>
     /// <summary>The reason code to use for the email: LastFailureReason, or one inferred from the bot's error text
     /// when the bot sent none (Google Meet blocks, the pre-recording lobby check).</summary>
     public static string? ClassifyReason(string? reasonCode, string? errorMessage)
@@ -124,6 +123,7 @@ public class MeetingAlertService
         return null;
     }
 
+    /// <summary>Plain-words reason for a failure, from the existing UI/controller messages.</summary>
     public static string FailureReasonText(string? reasonCode) => reasonCode switch
     {
         "lobby_timeout" => "The Notetaker waited in the meeting lobby, but nobody admitted it before the wait ran out.",
@@ -131,8 +131,8 @@ public class MeetingAlertService
         "no_primary_joined" => "No recording bot was able to join this meeting.",
         "primary_failed_window_passed" => "The recording bot failed and the meeting's join window has passed.",
         "bot_launch_failed" => "The recording bot stopped before it could join the meeting.",
-        "zoom_not_connected" => "Your Zoom account is not connected, so the Notetaker could not join the Zoom meeting. Connect it in Settings, then try again.",
-        "zoom_obf_unavailable" => "Zoom authorization was unavailable for this meeting. Make sure your Zoom account is connected in Settings, then try again.",
+        "zoom_not_connected" => "Your Zoom account is not connected, so the Notetaker could not join the Zoom meeting.",
+        "zoom_obf_unavailable" => "Zoom authorization was unavailable for this meeting.",
         "google_meet_blocked" => "Google Meet did not let the Notetaker join this meeting.",
         StaleMeetingWatchdogService.FailureReason => StaleMeetingWatchdogService.UserMessage,
         "transcription_submit_failed" => "The recording was received, but transcription could not be started.",
@@ -148,13 +148,13 @@ public class MeetingAlertService
     public static string FailureNextStepText(string? reasonCode) => reasonCode switch
     {
         "lobby_timeout" or "join_denied" or "no_primary_joined" or "bot_launch_failed" or "primary_failed_window_passed" =>
-            "If the meeting is still running, ask the organizer or a presenter to admit the Notetaker (or let it bypass the lobby) and use Join Meeting on the meeting page to try again.",
+            "If the meeting is still running, ask the organizer or a presenter to admit the Notetaker (or let it bypass the lobby) and use Join Now in your meetings list to try again.",
         "zoom_not_connected" or "zoom_obf_unavailable" =>
-            "Connect your Zoom account in Settings, then use Join Meeting on the meeting page to try again while the meeting is still running.",
+            "Connect your Zoom account in Settings, then use Join Now in your meetings list to try again while the meeting is still running.",
         StaleMeetingWatchdogService.FailureReason or "transcription_submit_failed" =>
             "You can retry the transcription from the meeting page.",
         IngestFailedReason => "Please upload the recording again.",
-        _ => "Open the meeting page for details. If the meeting is still running you can use Join Meeting to try again."
+        _ => "Open the meeting page for details. If the meeting is still running you can use Join Now in your meetings list to try again."
     };
 
     public static AlertEmail BuildAdmissionWarningEmail(string title, DateTime startUtc, string botName, int lobbyWaitMinutes,
