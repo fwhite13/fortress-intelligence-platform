@@ -17,26 +17,11 @@
 
         @if (_showHostToggle)
         {
+            @* WI #9680: Mode A is mothballed (Firm:EnableModeA=false), so the "are you the host" choice that
+               only picked Mode A is gone; every meeting added here uses the Notetaker (bot) path. *@
             <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Business">
-                @Branding.OrgName-hosted Teams meeting detected.
+                @Branding.OrgName-hosted Teams meeting detected — @Branding.NotetakerName will join to record.
             </MudAlert>
-            <div class="d-flex align-center gap-3 mb-3">
-                <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">Are you the host of this meeting?</MudText>
-                <MudToggleGroup T="string" @bind-Value="_isHostValue" SelectionMode="SelectionMode.SingleSelection">
-                    <MudToggleItem Value="@("yes")" Text="Yes" />
-                    <MudToggleItem Value="@("no")" Text="No" />
-                </MudToggleGroup>
-            </div>
-            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-3">
-                @if (_isHostValue == "yes")
-                {
-                    <span>Mode A — @Branding.ModuleName will capture the transcript directly without a bot joining.</span>
-                }
-                else
-                {
-                    <span>Mode B — @Branding.NotetakerName will join to record.</span>
-                }
-            </MudText>
         }
 
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
@@ -84,7 +69,6 @@
     private TimeSpan? _startTime;
     private string? _validationError;
     private bool _showHostToggle = false;
-    private string _isHostValue = "no";
     // Browser's minutes-behind-UTC (EDT = 240). The server runs in UTC, so the entered
     // date/time must be shifted by the *browser's* offset, not the server's local zone.
     private int _tzOffsetMinutes = 0;
@@ -116,16 +100,10 @@
         var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
         _showHostToggle = !string.IsNullOrEmpty(tenantId) && Branding.IsHomeTenant(tenantId)
                           && MeetingUrl.Contains("teams.microsoft.com");
-        if (!_showHostToggle) _isHostValue = "no";
     }
 
-    private string? GetDetectedMode()
-    {
-        if (!MeetingUrl.Contains("teams.microsoft.com")) return "B";
-        var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-        if (Branding.IsHomeTenant(tenantId) && _isHostValue == "yes") return "A";
-        return "B";
-    }
+    // WI #9680: always Mode B (the Notetaker joins), like JoinMeetingDialog: Mode A is mothballed.
+    private static string GetDetectedMode() => "B";
 
     private DateTime? GetScheduledDatetime()
     {
@@ -170,7 +148,7 @@
             return;
         }
         var mode = GetDetectedMode();
-        var isHost = _isHostValue == "yes";
+        const bool isHost = false; // WI #9680: no host choice any more (it only picked Mode A); tuple shape kept for Meetings.razor
         MudDialog.Close(DialogResult.Ok((cleanedUrl, MeetingTitle, dt.Value, isHost, mode)));
     }
 

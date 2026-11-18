@@ -1186,7 +1186,7 @@
         return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes} min";
     }
 
-    private static string FormatPlatform(string? platform)
+    private string FormatPlatform(string? platform)
     {
         if (string.IsNullOrWhiteSpace(platform)) return "Teams";
         return platform.Trim().ToLowerInvariant() switch
@@ -1196,7 +1196,7 @@
             "meet" => "Google Meet",
             // WI #9136 (spec §6.2): explicit labels for the non-bot sources.
             "plaud" => "Plaud",
-            "mobile" => "FIRM Mobile",
+            "mobile" => $"{Branding.ModuleName} Mobile",
             "upload" => "Uploaded recording", // WI #9139
             var other => char.ToUpperInvariant(other[0]) + other[1..]
         };

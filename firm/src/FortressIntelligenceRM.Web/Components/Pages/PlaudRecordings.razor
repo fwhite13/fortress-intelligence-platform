@@ -44,7 +44,7 @@
         <MudPaper Elevation="0" Outlined="true" Class="pa-4">
             <MudText Typo="Typo.body1" Style="color: var(--color-text-primary);" Class="mb-3">
                 @(_account.OtherEnvironment
-                    ? "Your Plaud account is connected on another FIRM environment. Reconnect here to see your recordings."
+                    ? $"Your Plaud account is connected on another {Branding.ModuleName} environment. Reconnect here to see your recordings."
                     : "Plaud needs to be reconnected before your recordings can be listed.")
             </MudText>
             <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
@@ -512,7 +512,7 @@
             var result = await PlaudSync.QueueSelectedAsync(userId, ids, _files.ToList(), CancellationToken.None);
             var started = result.Queued + result.Requeued;
             if (started == 0)
-                Snackbar.Add(retry ? "That recording can not be retried." : "Nothing to import: those recordings are already in FIRM or can not be imported.", Severity.Info);
+                Snackbar.Add(retry ? "That recording can not be retried." : $"Nothing to import: those recordings are already in {Branding.ModuleName} or can not be imported.", Severity.Info);
             else
             {
                 var msg = retry ? "Retrying the import."
@@ -522,9 +522,9 @@
                 if (result.AlreadyRunning)
                     msg += " Another Plaud import is running; these start shortly.";
                 else if (result.ErrorCode is "rate_limited")
-                    msg += " Plaud is busy; FIRM retries automatically.";
+                    msg += $" Plaud is busy; {Branding.ModuleName} retries automatically.";
                 else if (result.ErrorCode != null)
-                    msg += " Plaud had a problem; FIRM retries automatically.";
+                    msg += $" Plaud had a problem; {Branding.ModuleName} retries automatically.";
                 Snackbar.Add(msg, Severity.Success);
             }
         }
@@ -621,12 +621,12 @@
         };
     }
 
-    private static string ErrorText(string code) => code switch
+    private string ErrorText(string code) => code switch
     {
         "rate_limited" => "Plaud is rate-limiting; try again in a few minutes.",
         "unauthorized" or "reconnect_needed" => "Plaud needs to be reconnected.",
         "not_connected" => "No Plaud account connected.",
-        "other_environment" => "Connected on another FIRM environment.",
+        "other_environment" => $"Connected on another {Branding.ModuleName} environment.",
         "plaud_unreachable" or "plaud_timeout" or "token_unavailable" => "Plaud didn't respond; try again later.",
         _ => "Plaud is unavailable right now; try again later.",
     };
