@@ -170,7 +170,7 @@
                     <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_retranscribeError</MudAlert>
                 }
                 <SharePanel MeetingId="@_meeting.Id"
-                            ShowKbSection="@(Branding.SuiteName != "RISE")"
+                            ShowKbSection="@(Branding.SuiteName != "RISE" && FaitKb.IsEnabled(Configuration))"
                             ShowTeamsPost="false" />
             }
         </MudPaper>
@@ -1009,6 +1009,7 @@
 
     private async Task PushTranscript()
     {
+        if (!FaitKb.IsEnabled(Configuration)) return; // WI #9743
         if (_pushingTranscript || _meeting == null || _user == null) return;
         _pushingTranscript = true;
         try
@@ -1038,6 +1039,7 @@
 
     private async Task PushSummary()
     {
+        if (!FaitKb.IsEnabled(Configuration)) return; // WI #9743
         if (_pushingSummary || _meeting == null || _user == null) return;
         _pushingSummary = true;
         try

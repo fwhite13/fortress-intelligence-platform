@@ -647,9 +647,12 @@ Transcript:
     private async Task NotifyFaitMeetingCompleteAsync(long meetingId, string transcriptText, string summaryText,
         FirmDbContext db, CancellationToken ct)
     {
+        // WI #9743: no FAIT call (and no body built) when the FAIT KB switch is off.
+        var faitApiUrl = FaitKb.ApiUrlOrDefault(_config);
+        if (faitApiUrl == null) return;
+
         try
         {
-            var faitApiUrl = _config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
             var sharedSecret = _config["Firm:SharedSecret"] ?? "";
 
             // Get meeting + user info

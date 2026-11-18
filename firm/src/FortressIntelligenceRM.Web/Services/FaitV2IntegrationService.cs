@@ -24,6 +24,10 @@ public class FaitV2IntegrationService : IFaitV2IntegrationService
 
     public async Task SendTranscriptAsync(string entraOid, string meetingId, string transcript, string? title = null, CancellationToken ct = default)
     {
+        // WI #9743: no FAIT v2 call when the FAIT KB switch is off (service has no caller today; guard kept
+        // because appsettings.json ships a FaitV2:BaseUrl default).
+        if (!FaitKb.IsEnabled(_config)) return;
+
         var baseUrl = _config["FaitV2:BaseUrl"];
         var secret = _config["FaitV2:SharedSecret"];
         if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(secret))

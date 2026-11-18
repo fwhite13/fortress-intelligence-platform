@@ -4,14 +4,15 @@
 @inject IFirmBotService BotService
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IConfiguration Configuration
 
-@if (ShowKbSection || ShowTeamsPost)
+@if (KbVisible || ShowTeamsPost)
 {
 <MudPaper Class="pa-4 mb-4" Elevation="1">
     <MudText Typo="Typo.h6" Class="mb-3">Share Meeting</MudText>
 
-    @* KB Section *@
-    @if (ShowKbSection)
+    @* KB Section (WI #9743: never rendered when the FAIT KB switch is off) *@
+    @if (KbVisible)
     {
     <MudText Typo="Typo.subtitle1" Class="mb-2">Push to Knowledge Base</MudText>
     @if (_kbLoading)
@@ -43,7 +44,7 @@
     }
     }
 
-    @if (ShowKbSection && ShowTeamsPost)
+    @if (KbVisible && ShowTeamsPost)
     {
         <MudDivider Class="my-4" />
     }
@@ -111,6 +112,8 @@
 @code {
     [Parameter] public long MeetingId { get; set; }
     [Parameter] public bool ShowKbSection { get; set; } = true;
+    // WI #9743: the caller's choice AND the FAIT KB master switch (Firm:FaitKbEnabled).
+    private bool KbVisible => ShowKbSection && FaitKb.IsEnabled(Configuration);
     [Parameter] public bool ShowTeamsPost { get; set; } = true;
 
     // KB state
@@ -195,6 +198,7 @@
     private async Task PushToKb()
     {
         if (_kbPushing) return;
+        if (!KbVisible) return; // WI #9743
         if (_user == null) { Snackbar.Add("User not loaded. Please refresh.", Severity.Error); return; }
         if (string.IsNullOrEmpty(_user.FaitUserId)) { Snackbar.Add("FAIT user ID not linked. Please sign out and back in.", Severity.Warning); return; }
 

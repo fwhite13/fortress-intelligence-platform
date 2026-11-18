@@ -41,6 +41,9 @@ public class FirmKbService
     /// <summary>Push meeting transcript to the user's personal KB in S3, then trigger Bedrock ingestion.</summary>
     public async Task PushTranscriptAsync(long meetingId, string userId, string faitUserId)
     {
+        // WI #9743: last guard. Nothing is written to the FAIT KB when the switch is off.
+        if (!FaitKb.IsEnabled(_config)) throw new InvalidOperationException(FaitKb.DisabledMessage);
+
         if (string.IsNullOrWhiteSpace(faitUserId))
         {
             _logger.LogWarning("FirmKbService: faitUserId is null/empty for meeting {MeetingId} — skipping transcript push", meetingId);
@@ -104,6 +107,9 @@ public class FirmKbService
     /// <summary>Push meeting summary to the user's personal KB in S3, then trigger Bedrock ingestion.</summary>
     public async Task PushSummaryAsync(long meetingId, string userId, string faitUserId)
     {
+        // WI #9743: last guard. Nothing is written to the FAIT KB when the switch is off.
+        if (!FaitKb.IsEnabled(_config)) throw new InvalidOperationException(FaitKb.DisabledMessage);
+
         if (string.IsNullOrWhiteSpace(faitUserId))
         {
             _logger.LogWarning("FirmKbService: faitUserId is null/empty for meeting {MeetingId} — skipping summary push", meetingId);
@@ -194,6 +200,9 @@ public class FirmKbService
     /// </summary>
     public async Task PushDocumentAsync(long meetingId, string userId, string faitUserId, string docType, IEnumerable<string> kbScopes)
     {
+        // WI #9743: last guard. Nothing is written to the FAIT KB when the switch is off.
+        if (!FaitKb.IsEnabled(_config)) throw new InvalidOperationException(FaitKb.DisabledMessage);
+
         var scopeList = kbScopes.Distinct().ToList();
         if (!scopeList.Any()) return;
 
