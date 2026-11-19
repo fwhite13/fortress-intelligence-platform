@@ -23,8 +23,9 @@
                        OnClick="() => _helpOpen = true"
                        aria-label="Help" />
     </MudStack>
+    @* WI #9810: "knowledge base" only when the FAIT KB switch (Firm:FaitKbEnabled) is on; RN reads "personal wiki". *@
     <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
-        Your personal knowledge base. Add terms, names, acronyms, and context that are specific to your work. These entries help the AI produce more accurate transcriptions and summaries for your meetings.
+        @(FaitKb.IsEnabled(Configuration) ? "Your personal knowledge base." : "Your personal wiki.") Add terms, names, acronyms, and context that are specific to your work. These entries help the AI produce more accurate transcriptions and summaries for your meetings.
     </MudText>
 
     @if (_loading)

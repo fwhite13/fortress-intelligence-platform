@@ -1,6 +1,8 @@
+@inject IConfiguration Configuration
+@* WI #9810: "knowledge base" only when the FAIT KB switch (Firm:FaitKbEnabled) is on; RN reads "personal wiki". *@
 <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-1 mb-1">Overview</MudText>
 <MudText Typo="Typo.body2">
-    My Wiki is your personal knowledge base. Entries you add here are used by the AI to produce more
+    @(FaitKb.IsEnabled(Configuration) ? "My Wiki is your personal knowledge base." : "My Wiki is your personal wiki.") Entries you add here are used by the AI to produce more
     accurate transcriptions and summaries for your meetings — helping it recognise names, acronyms,
     project codenames, and terminology specific to your work.
 </MudText>
