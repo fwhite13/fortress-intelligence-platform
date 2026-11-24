@@ -54,6 +54,22 @@ public class MeetingService
     }
 
     /// <summary>
+    /// WI #9966: light status-change probe for the /meetings page. Returns only (id, status,
+    /// updated_at) for every row the user owns: same row set as <see cref="GetMeetingsAsync"/>, but
+    /// no ordering, no subscriber query and no tracking, served by idx_fm_created_by (created_by).
+    /// The page compares this with the snapshot of its last full load and reloads only on a change.
+    /// </summary>
+    public async Task<List<MeetingStatusStamp>> GetMeetingStatusStampsAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Meetings
+            .AsNoTracking()
+            .Where(m => m.CreatedBy == userId)
+            .Select(m => new MeetingStatusStamp(m.Id, m.Status, m.UpdatedAt))
+            .ToListAsync();
+    }
+
+    /// <summary>
     /// Resolve the display name of a meeting's owning (creating) user, for the
     /// bot's post-join chat notification (BOT_NAMES_CSV — WI #7034).
     /// Single-user only for now; multi-user/subscriber aggregation via
@@ -1259,3 +1275,6 @@ public class MeetingService
         return primaryId ?? meetingId;
     }
 }
+
+/// <summary>WI #9966: one row of the /meetings light status-change poll (see MeetingService.GetMeetingStatusStampsAsync).</summary>
+public sealed record MeetingStatusStamp(long Id, MeetingStatus Status, DateTime UpdatedAt);
