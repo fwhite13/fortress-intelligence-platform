@@ -130,6 +130,7 @@ public class FirmDbContext : DbContext
             // WI #9644 — owner alert dedupe stamps
             entity.Property(e => e.AdmissionWarningSentAt).HasColumnName("admission_warning_sent_at");
             entity.Property(e => e.FailureAlertSentAt).HasColumnName("failure_alert_sent_at");
+            entity.Property(e => e.LobbyEnteredAt).HasColumnName("lobby_entered_at"); // WI #9963
             entity.HasIndex(e => new { e.CreatedBy, e.ExternalId })
                 .IsUnique()
                 .HasDatabaseName("uk_fm_created_by_external_id")

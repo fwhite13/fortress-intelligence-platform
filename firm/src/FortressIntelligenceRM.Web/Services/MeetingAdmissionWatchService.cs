@@ -6,10 +6,14 @@ using Task = System.Threading.Tasks.Task;
 namespace FortressIntelligenceRM.Web.Services;
 
 /// <summary>
-/// WI #9644 — emails a meeting's owner (only) once when the Notetaker has not been admitted 3 minutes
-/// after the scheduled start.
+/// WI #9644 — emails a meeting's owner (only) once per run when the Notetaker has waited 3 minutes in the
+/// meeting lobby without being admitted.
 ///
-/// Every 30 s it selects bot meetings (a meeting URL, not Plaud/mobile/upload) whose StartDatetime is
+/// WI #9963: timed from lobby_entered_at (stamped by the bot's "lobby_entered" callback when it starts the
+/// Teams lobby wait), the same clock as the bot's own lobby give-up, so manual Join Now meetings with no
+/// scheduled start are covered too. Rows without lobby_entered_at are never warned (the failure email covers them).
+///
+/// Every 30 s it selects bot meetings (a meeting URL, not Plaud/mobile/upload) whose lobby_entered_at is
 /// 3 to 60 minutes ago, that have not started (StartedAt null), are still Scheduled/Pending/Joining and
 /// have no admission_warning_sent_at. Each candidate is re-checked by
 /// <see cref="MeetingAlertService.GetAdmissionWarningSkipReason"/> (owner active, has an email, toggle on)
@@ -75,8 +79,8 @@ public class MeetingAdmissionWatchService : BackgroundService
     private async Task CheckAsync(CancellationToken ct)
     {
         var now = DateTime.UtcNow;
-        var latestStart = now - MeetingAlertService.AdmissionWarningAfter;
-        var earliestStart = now - MeetingAlertService.AdmissionWarningUntil;
+        var latestLobbyEntry = now - MeetingAlertService.AdmissionWarningAfter;
+        var earliestLobbyEntry = now - MeetingAlertService.AdmissionWarningUntil;
 
         List<FirmMeeting> candidates;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
@@ -86,16 +90,16 @@ public class MeetingAdmissionWatchService : BackgroundService
                 .Include(m => m.CreatedByUser)
                 .Where(m => m.AdmissionWarningSentAt == null
                          && m.StartedAt == null
-                         && m.StartDatetime != null
-                         && m.StartDatetime <= latestStart
-                         && m.StartDatetime >= earliestStart
+                         && m.LobbyEnteredAt != null
+                         && m.LobbyEnteredAt <= latestLobbyEntry
+                         && m.LobbyEnteredAt >= earliestLobbyEntry
                          && (m.Status == MeetingStatus.Scheduled || m.Status == MeetingStatus.Pending || m.Status == MeetingStatus.Joining)
                          && m.MeetingUrl != null && m.MeetingUrl != ""
                          && m.Source != "plaud" && m.Source != "mobile" && m.Source != "upload"
                          // Owner filter here too, so an opted-out owner is not re-evaluated (and logged) every 30 s.
                          && m.CreatedByUser != null && m.CreatedByUser.IsActive && m.CreatedByUser.NotifyMeetingProblems
                          && m.CreatedByUser.Email != "")
-                .OrderBy(m => m.StartDatetime)
+                .OrderBy(m => m.LobbyEnteredAt)
                 .Take(MaxPerTick)
                 .ToListAsync(ct);
         }

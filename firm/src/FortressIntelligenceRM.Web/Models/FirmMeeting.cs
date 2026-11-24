@@ -84,10 +84,13 @@ public class FirmMeeting
     /// (CreatedBy, ExternalId) via uk_fm_created_by_external_id; null for bot, calendar and mobile rows.</summary>
     [MaxLength(128)]
     public string? ExternalId { get; set; }
-    /// <summary>WI #9644 — when the owner was emailed that the Notetaker has not been admitted (claimed atomically; one warning per row).</summary>
+    /// <summary>WI #9644 — when the owner was emailed that the Notetaker has not been admitted (claimed atomically; one warning per run, cleared when the row starts a new run — WI #9963).</summary>
     public DateTime? AdmissionWarningSentAt { get; set; }
     /// <summary>WI #9644 — when the owner was emailed that this row failed (claimed atomically). Cleared when the row starts a new run.</summary>
     public DateTime? FailureAlertSentAt { get; set; }
+    /// <summary>WI #9963 — when the bot started waiting in the Teams lobby (bot "lobby_entered" callback; set once per run,
+    /// cleared with admission_warning_sent_at when the row starts a new run). The admission warning is timed from it.</summary>
+    public DateTime? LobbyEnteredAt { get; set; }
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;
