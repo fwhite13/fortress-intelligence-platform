@@ -177,6 +177,20 @@ export class TeamsHandler {
   private _speakerCaptureActive = false;
   private _speakerPollCount = 0;
   private _recordingStartMs: number = 0;
+  // WI #9963: called once when the bot starts waiting in the Teams lobby (firm-web times the owner's
+  // "not admitted" warning from it). Fire-and-forget: the hook must never affect the join.
+  onLobbyEntered: (() => void) | null = null;
+  private _lobbyEnteredNotified = false;
+
+  private notifyLobbyEntered(): void {
+    if (this._lobbyEnteredNotified || !this.onLobbyEntered) return;
+    this._lobbyEnteredNotified = true;
+    try {
+      this.onLobbyEntered();
+    } catch (err) {
+      console.warn('[Teams] Lobby-entered hook error (non-fatal):', (err as Error)?.message ?? err);
+    }
+  }
 
   /**
    * Turn on Teams live captions (WI #8154) — the caption DOM is the active
@@ -1090,6 +1104,7 @@ export class TeamsHandler {
       const lobbyDeadline = Date.now() + lobbyTimeoutSeconds * 1000;
       const lobbyStartedAt = Date.now();
       console.log(`[Teams] In waiting room / lobby, waiting to be admitted (up to ${lobbyTimeoutSeconds}s)...`);
+      this.notifyLobbyEntered();
       await TeamsHandler.screenshot(page, '04b-waiting-room', s3, meetingId);
       let admitted = false;
       // Poll every 10s until admitted or the lobby deadline passes (WI #8576)

@@ -318,6 +318,12 @@ export class MeetingBot extends EventEmitter {
         switch (this.meeting.platform) {
           case 'teams':
             this._teamsHandler = new TeamsHandler();
+            // WI #9963: one fire-and-forget callback when the bot starts waiting in the lobby, so firm-web
+            // times the owner's "not admitted" warning from the same moment as the lobby give-up.
+            // Not awaited; reportStatus never throws (it logs failures), and the catch is belt and braces.
+            this._teamsHandler.onLobbyEntered = () => {
+              void reportStatus(this.meeting.id, 'lobby_entered').catch(() => {});
+            };
             await this._teamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
             // Save storage state after successful Teams join for session persistence.
             // Fire-and-forget so the S3 upload doesn't delay FFmpeg start (WI #8182).
