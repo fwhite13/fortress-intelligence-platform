@@ -43,7 +43,7 @@ public class EmailService : IEmailService
         var mimeBody = new StringBuilder();
         mimeBody.AppendLine($"From: {FromAddress}");
         mimeBody.AppendLine($"To: {toEmail}");
-        mimeBody.AppendLine($"Subject: {subject}");
+        mimeBody.AppendLine($"Subject: {EncodeSubjectHeader(subject)}");
         mimeBody.AppendLine("MIME-Version: 1.0");
         mimeBody.AppendLine($"Content-Type: multipart/mixed; boundary=\"{boundary}\"");
         mimeBody.AppendLine();
@@ -102,6 +102,51 @@ public class EmailService : IEmailService
             }
         };
         await _ses.SendEmailAsync(request);
+    }
+
+    /// <summary>
+    /// WI #9972 — the value for a raw "Subject: " header line. Every run of CR/LF is replaced by one space
+    /// so a title cannot start a new header. A pure-ASCII subject is returned as-is (plain header).
+    /// Otherwise it is written as RFC 2047 "B" encoded-words (=?UTF-8?B?...?=), each at most 75 characters,
+    /// folded with CRLF + space. Words split only on Unicode scalar boundaries (never inside a UTF-8
+    /// sequence or a surrogate pair). The first word is shorter so the line "Subject: " + word stays within 76.
+    /// </summary>
+    public static string EncodeSubjectHeader(string? subject)
+    {
+        var clean = Regex.Replace(subject ?? "", @"[\r\n]+", " ");
+
+        var isAscii = true;
+        foreach (var c in clean)
+        {
+            if (c > 0x7E || (c < 0x20 && c != '\t')) { isAscii = false; break; }
+        }
+        if (isAscii) return clean;
+
+        const string prefix = "=?UTF-8?B?";
+        const string suffix = "?=";
+        // 75-char word: 63 chars of base64 room -> 60 usable (multiple of 4) -> 45 bytes.
+        // First word: "Subject: " (9) + word <= 76 -> 67-char word -> 52 base64 chars -> 39 bytes.
+        const int firstMaxBytes = 39;
+        const int nextMaxBytes = 45;
+
+        var words = new List<string>();
+        var chunk = new List<byte>();
+        var maxBytes = firstMaxBytes;
+        Span<byte> runeBytes = stackalloc byte[4];
+        foreach (var rune in clean.EnumerateRunes()) // lone surrogates come back as U+FFFD
+        {
+            var n = rune.EncodeToUtf8(runeBytes);
+            if (chunk.Count + n > maxBytes)
+            {
+                words.Add(prefix + Convert.ToBase64String(chunk.ToArray()) + suffix);
+                chunk.Clear();
+                maxBytes = nextMaxBytes;
+            }
+            for (var i = 0; i < n; i++) chunk.Add(runeBytes[i]);
+        }
+        if (chunk.Count > 0) words.Add(prefix + Convert.ToBase64String(chunk.ToArray()) + suffix);
+
+        return string.Join("\r\n ", words);
     }
 
     private static string WrapBase64(string base64String, int lineLength)
