@@ -152,6 +152,25 @@ public class MeetingsApiController : ControllerBase
         _logger.LogInformation("FIRM: VP callback received for meeting {Id}, status {Status}",
             payload.MeetingId, payload.Status);
 
+        // WI #9963: the bot started waiting in the Teams lobby. Stamp lobby_entered_at once per run (the
+        // admission warning is timed from it); no status change. Never fails the bot: always 200.
+        if (string.Equals(payload.Status, "lobby_entered", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await using var lobbyDb = await _dbFactory.CreateDbContextAsync();
+                var stamped = await lobbyDb.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE firm_meetings SET lobby_entered_at = UTC_TIMESTAMP() WHERE id = {payload.MeetingId} AND lobby_entered_at IS NULL AND started_at IS NULL AND status IN ('Scheduled', 'Pending', 'Joining')");
+                _logger.LogInformation("FIRM: Meeting {Id} bot entered the lobby — lobby_entered_at {Result}",
+                    payload.MeetingId, stamped == 1 ? "set" : "already set or row not pre-recording (unchanged)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("FIRM: Meeting {Id} lobby_entered stamp failed: {Error}", payload.MeetingId, ex.GetType().Name);
+            }
+            return Ok();
+        }
+
         var statusMap = new Dictionary<string, MeetingStatus>(StringComparer.OrdinalIgnoreCase)
         {
             ["recording"] = MeetingStatus.Recording,

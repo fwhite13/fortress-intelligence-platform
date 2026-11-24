@@ -9,8 +9,8 @@ namespace FortressIntelligenceRM.Web.Services;
 /// WI #9644 — owner-only problem emails.
 ///
 /// Two emails, both to the meeting row's own owner (CreatedBy user's Email) and never to anyone else:
-///  * Admission warning: the Notetaker has not been admitted 3 minutes after the scheduled start
-///    (sent by <see cref="MeetingAdmissionWatchService"/>).
+///  * Admission warning: the Notetaker has waited 3 minutes in the meeting lobby without being admitted
+///    (timed from lobby_entered_at, WI #9963; sent by <see cref="MeetingAdmissionWatchService"/>).
 ///  * Failure alert: the row went Failed (<see cref="NotifyFailure"/>, called from every place that
 ///    sets a meeting to Failed). One email per failed run, deduped by failure_alert_sent_at, which
 ///    is cleared when the same row starts a new run.
@@ -30,9 +30,9 @@ public class MeetingAlertService
 {
     public const string EnabledConfigKey = "Firm:OwnerAlertsEnabled";
 
-    /// <summary>Warn once this long after the scheduled start if the bot still has not joined.</summary>
+    /// <summary>Warn once the bot has waited this long in the lobby (from lobby_entered_at, WI #9963) without being admitted.</summary>
     public static readonly TimeSpan AdmissionWarningAfter = TimeSpan.FromMinutes(3);
-    /// <summary>Never warn about a meeting that started longer ago than this.</summary>
+    /// <summary>Never warn when the bot entered the lobby longer ago than this.</summary>
     public static readonly TimeSpan AdmissionWarningUntil = TimeSpan.FromMinutes(60);
     /// <summary>No failure alert for rows whose meeting/recording is older than this at the moment of failing
     /// (backfills, bulk watchdog sweeps of old rows).</summary>
@@ -81,14 +81,21 @@ public class MeetingAlertService
         return null;
     }
 
-    /// <summary>Null when the admission warning should be sent for this row now, else the skip reason.</summary>
+    /// <summary>
+    /// Null when the admission warning should be sent for this row now, else the skip reason.
+    /// WI #9963: timed from lobby_entered_at (the bot's "lobby_entered" callback), the same clock as the bot's own
+    /// lobby give-up, so manual Join Now meetings (no scheduled start) are covered; the scheduled start is not used.
+    /// Reasons, in order: already-sent, no-lobby-time (bot never reported a lobby wait; the failure email covers it),
+    /// too-early (&lt; 3 min in the lobby), too-late (&gt; 60 min since lobby entry), already-joined, not-pre-recording,
+    /// not-bot-meeting (no URL, or a Plaud/mobile/upload source), then the owner reasons (<see cref="GetOwnerSkipReason"/>).
+    /// </summary>
     public static string? GetAdmissionWarningSkipReason(FirmMeeting m, FirmUser? owner, DateTime nowUtc)
     {
         if (m.AdmissionWarningSentAt != null) return "already-sent";
-        if (m.StartDatetime is not DateTime start) return "no-start-time";
-        var sinceStart = nowUtc - start;
-        if (sinceStart < AdmissionWarningAfter) return "too-early";
-        if (sinceStart > AdmissionWarningUntil) return "too-late";
+        if (m.LobbyEnteredAt is not DateTime lobbyEnteredAt) return "no-lobby-time";
+        var inLobby = nowUtc - lobbyEnteredAt;
+        if (inLobby < AdmissionWarningAfter) return "too-early";
+        if (inLobby > AdmissionWarningUntil) return "too-late";
         if (m.StartedAt != null) return "already-joined";
         if (!PreRecordingStatuses.Contains(m.Status)) return "not-pre-recording";
         if (!IsBotMeeting(m)) return "not-bot-meeting";
@@ -157,18 +164,21 @@ public class MeetingAlertService
         _ => "Open the meeting page for details. If the meeting is still running you can use Join Now in your meetings list to try again."
     };
 
-    public static AlertEmail BuildAdmissionWarningEmail(string title, DateTime startUtc, string botName, int lobbyWaitMinutes,
-        string? meetingLink)
+    /// <summary>WI #9963: sent once the bot has waited <paramref name="waitedMinutes"/> in the lobby (timed from
+    /// lobby_entered_at, not the scheduled start). The scheduled start is mentioned only when the row has one.</summary>
+    public static AlertEmail BuildAdmissionWarningEmail(string title, DateTime? scheduledUtc, string botName, int waitedMinutes,
+        int lobbyWaitMinutes, string? meetingLink)
     {
-        var when = FormatTime(startUtc);
         var subject = $"Your Notetaker hasn't been admitted to {OneLine(title)}";
+        var waited = waitedMinutes == 1 ? "1 minute" : $"{waitedMinutes} minutes";
         var lines = new List<string>
         {
-            $"Your meeting \"{title}\" was scheduled to start at {when}.",
-            $"{botName} has not been admitted yet: it is waiting to be let in, or it has not been able to join.",
-            "Please ask the meeting organizer or a presenter to admit it from the lobby.",
-            $"If nobody admits it, it will give up after the {lobbyWaitMinutes}-minute wait and email you again."
+            $"{botName} has been waiting in the lobby of your meeting \"{title}\" for {waited} and has not been admitted yet."
         };
+        if (scheduledUtc is DateTime s)
+            lines.Add($"The meeting was scheduled to start at {FormatTime(s)}.");
+        lines.Add("Please ask the meeting organizer or a presenter to admit it from the lobby.");
+        lines.Add($"If nobody admits it, it will give up when its {lobbyWaitMinutes}-minute lobby wait runs out and email you again.");
         return Compose(subject, lines, meetingLink);
     }
 
@@ -318,12 +328,15 @@ public class MeetingAlertService
 
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
             var claimed = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE firm_meetings SET admission_warning_sent_at = UTC_TIMESTAMP() WHERE id = {meeting.Id} AND admission_warning_sent_at IS NULL AND started_at IS NULL",
+                $"UPDATE firm_meetings SET admission_warning_sent_at = UTC_TIMESTAMP() WHERE id = {meeting.Id} AND admission_warning_sent_at IS NULL AND started_at IS NULL AND lobby_entered_at IS NOT NULL",
                 ct);
             if (claimed != 1) { LogSkipped(kind, meeting.Id, "claimed-elsewhere"); return false; }
 
-            var email = BuildAdmissionWarningEmail(meeting.Title ?? $"Meeting {meeting.Id}", meeting.StartDatetime!.Value,
-                BotName, LobbyWaitMinutes, MeetingLink(meeting.Id));
+            // Skip reason null ⇒ LobbyEnteredAt is set and at least AdmissionWarningAfter ago.
+            var waitedMinutes = Math.Max((int)AdmissionWarningAfter.TotalMinutes,
+                (int)Math.Floor((nowUtc - meeting.LobbyEnteredAt!.Value).TotalMinutes));
+            var email = BuildAdmissionWarningEmail(meeting.Title ?? $"Meeting {meeting.Id}", meeting.StartDatetime,
+                BotName, waitedMinutes, LobbyWaitMinutes, MeetingLink(meeting.Id));
             return await SendAsync(kind, meeting.Id, meeting.CreatedByUser!.Email, email, null);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)

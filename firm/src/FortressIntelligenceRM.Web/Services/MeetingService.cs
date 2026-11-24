@@ -337,8 +337,13 @@ public class MeetingService
         if (errorMessage != null) meeting.ErrorMessage = errorMessage;
         if (lastFailureReason != null) meeting.LastFailureReason = lastFailureReason;
         // WI #9644: the row is starting a new run, so a later failure of that run alerts again.
+        // WI #9963: the new run also gets its own lobby clock and its own admission warning.
         if (status is MeetingStatus.Scheduled or MeetingStatus.Pending or MeetingStatus.Joining)
+        {
             meeting.FailureAlertSentAt = null;
+            meeting.LobbyEnteredAt = null;
+            meeting.AdmissionWarningSentAt = null;
+        }
         if (status == MeetingStatus.Recording)
         {
             // Bot successfully joined — any previously recorded failure (e.g. lobby_timeout) no longer applies.
@@ -545,6 +550,8 @@ public class MeetingService
             candidate.NormalizedMeetingUrl = normalizedUrl;
             candidate.Status = MeetingStatus.Scheduled;
             candidate.FailureAlertSentAt = null; // WI #9644 — new run for this row
+            candidate.LobbyEnteredAt = null;     // WI #9963 — fresh lobby clock and admission warning for the new run
+            candidate.AdmissionWarningSentAt = null;
             candidate.UpdatedAt = now;
 
             foreach (var other in subscribers.Where(m => m.Id != candidate.Id))

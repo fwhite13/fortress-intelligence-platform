@@ -409,6 +409,8 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_users ADD COLUMN notify_meeting_problems TINYINT(1) NOT NULL DEFAULT 1",
                 "ALTER TABLE firm_meetings ADD COLUMN admission_warning_sent_at DATETIME NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN failure_alert_sent_at DATETIME NULL",
+                // WI #9963 — when the bot started waiting in the Teams lobby; the admission warning is timed from it.
+                "ALTER TABLE firm_meetings ADD COLUMN lobby_entered_at DATETIME NULL",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
                 "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",
