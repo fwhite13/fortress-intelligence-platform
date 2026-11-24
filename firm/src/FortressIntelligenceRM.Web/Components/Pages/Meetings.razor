@@ -249,6 +249,10 @@
     private string? _userEmail;
     private System.Threading.Timer? _pollTimer;
     private int _startupPollCount = 0;
+    // WI #9966: (status, updated_at) per meeting id as of the last full load; null = no good load yet.
+    // Replaced as a whole (never mutated), so the timer thread can read it without a lock.
+    private Dictionary<long, (MeetingStatus Status, DateTime UpdatedAt)>? _statusSnapshot;
+    private int _pollInFlight; // 1 while a timer tick (light or full poll) runs; ticks never overlap.
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
     private HashSet<long> _calendarRemovedMeetingIds = new();
@@ -417,16 +421,22 @@
             if (_userId == null)
             {
                 _meetings = new();
+                _statusSnapshot = null;
                 return;
             }
             _meetings = await MeetingService.GetMeetingsAsync(Guid.Parse(_userId));
             await PreFormatMeetingTimesAsync();
+            // WI #9966: every full load (timer, Refresh, any action) resets the light-poll baseline.
+            _statusSnapshot = _meetings.ToDictionary(m => m.Id, m => (m.Status, m.UpdatedAt));
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "FIRM Meetings: error loading meetings for user {UserId}", _userId);
             Snackbar.Add($"Failed to load meetings: {ex.Message}", Severity.Error);
             _meetings = new();
+            // No baseline after a failed load: the light poll stays idle until a load succeeds,
+            // so a persistent DB error does not turn into an error snackbar every tick.
+            _statusSnapshot = null;
         }
         finally
         {
@@ -587,18 +597,63 @@
     {
         _pollTimer = new System.Threading.Timer(async _ =>
         {
-            _startupPollCount++;
-            var hasActive = _meetings.Any(m =>
-                m.Status is MeetingStatus.Joining or MeetingStatus.Recording
-                    or MeetingStatus.Transcribing or MeetingStatus.Summarizing);
-            // Poll unconditionally for first 6 cycles (~60s startup window),
-            // then revert to conditional polling based on active meetings
-            if (_startupPollCount <= 6 || hasActive)
+            // WI #9966: skip this tick while the previous one is still running (no overlapping polls).
+            if (Interlocked.Exchange(ref _pollInFlight, 1) == 1) return;
+            try
             {
-                await LoadMeetings();
-                await InvokeAsync(StateHasChanged);
+                _startupPollCount++;
+                var hasActive = _meetings.Any(m =>
+                    m.Status is MeetingStatus.Joining or MeetingStatus.Recording
+                        or MeetingStatus.Transcribing or MeetingStatus.Summarizing);
+                // Poll unconditionally for first 6 cycles (~60s startup window),
+                // then revert to conditional polling based on active meetings
+                if (_startupPollCount <= 6 || hasActive)
+                {
+                    await LoadMeetings();
+                    await InvokeAsync(StateHasChanged);
+                }
+                // WI #9966: only Scheduled/Pending/terminal rows: one narrow id/status/updated_at
+                // query; full reload only when it differs from the last full load. No change = no render.
+                else if (await StatusSnapshotChangedAsync())
+                {
+                    await LoadMeetings();
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _pollInFlight, 0);
             }
         }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>WI #9966: true when the user's meetings differ from <see cref="_statusSnapshot"/>:
+    /// a row's status or updated_at changed, a row appeared (e.g. calendar sync) or a row disappeared.
+    /// Status is compared as well as updated_at so a path that does not stamp updated_at is still seen.</summary>
+    private async Task<bool> StatusSnapshotChangedAsync()
+    {
+        var snapshot = _statusSnapshot;
+        var userId = _userId;
+        if (snapshot == null || userId == null) return false;
+        try
+        {
+            var current = await MeetingService.GetMeetingStatusStampsAsync(Guid.Parse(userId));
+            if (current.Count != snapshot.Count) return true;
+            // Same count and every id known => same row set (ids are unique).
+            foreach (var row in current)
+            {
+                if (!snapshot.TryGetValue(row.Id, out var seen)
+                    || seen.Status != row.Status
+                    || seen.UpdatedAt != row.UpdatedAt)
+                    return true;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "FIRM Meetings: light status poll failed for user {UserId}", userId);
+            return false;
+        }
     }
 
     private async Task OpenJoinDialog()
